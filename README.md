@@ -33,6 +33,26 @@ HoloCortexZero最终目的在以年为单位长程通用的，可自主发现创
 
 1.用户，频道context管理综述
 
+2.payload组装，降级，处理路由设计
+
+3.长短期记忆与回忆设计
+
+4.缓存设计，音频视频逻辑
+
+5.tool回路设计，内置tool讲解，tool开发介绍
+
+6.辅助功能：自动回复，语音，表情包
+
+7.兜底处理逻辑
+
+8.效果展示
+
+9.开始操作指南
+
+# 架构展开
+
+## 1.用户，频道context管理综述
+
 入口消息先由各平台 adapter 收到，再统一进入 `adapters/interface/collector.py`。collector 的第一步不是写库，而是调用 `adapters/interface/identity.py` 做身份归一化：平台侧的原始 user/channel 信息只在适配器边界处理一次，进入框架后统一使用 HCZ 规范化后的 `platform_userid`、`channel_id` 和 `chat_key`。这样后续命令、context 路由、权限、附件策略都只面对框架身份，不再为 QQ、Telegram、Matrix 等来源各写一套主干。
 
 用户与频道是两层持久化对象：
@@ -54,7 +74,7 @@ context 管理由 `services/context_window/manager.py` 负责，核心概念是�
 
 高级管理命令走 `MessageService`，例如 `/clear` 清当前上下文，`/clearall` 清高级上下文相关记录，`/test` 触发测试，`/norm`、`/cute`、`/puss` 切换高级上下文模式。这些命令是管理入口，不是普通用户能力；普通用户的同名文本不会进入特权控制路径。
 
-2.payload组装，降级，处理路由设计
+## 2.payload组装，降级，处理路由设计
 
 HCZ 的 payload 主线是“先组装协议无关 IR，再由 router 发射”。`services/context_window/assembler.py` 输出统一的 `GenerationRequest`，里面只有 `MessageTurn`、`MessagePart`、`ToolSpec`、`cache_hints` 等框架内部结构，不直接绑定 OpenAI chat、Responses 或 Gemini 的 wire shape。
 
@@ -77,7 +97,7 @@ fallback 不是重组第二份业务 payload。`LLMRouter.call_with_fallback()` 
 
 降级主要发生在 router 的媒体策略阶段，而不是散落到各 emitter。图片会先按数量限制裁剪，再物化为协议可接受的数据；WEBP 会全局转 JPEG，特定兼容目标下 GIF 会转 PNG。音频/视频按协议能力处理：Gemini 可保留音频/视频；chat/responses 对不支持的媒体降级成文本说明；tool 产生的视频默认只保留最近 1 个候选，内联上限 8MB、60 秒，必要时用 `ffmpeg` 压缩或提取音频预览。
 
-3.长短期记忆与回忆设计
+## 3.长短期记忆与回忆设计
 
 短期记忆就是当前 `DBContextWindow` 下的 `DBContextMessage` 历史。它不是简单复制某个群或私聊的全量聊天记录，而是由当前 context 的 active dialog 增量同步、去重、水位线、历史裁剪、压缩摘要共同维护。高级 context 默认 100 条历史后触发 timeline 压缩，保留最近 10 条；硬读取上限按 1.2 倍冗余计算。普通 context 默认 48 条触发归档回收，保留最近 10 条，并把较早历史整理成归档块。
 
@@ -93,7 +113,7 @@ fallback 不是重组第二份业务 payload。`LLMRouter.call_with_fallback()` 
 
 自动记忆由 `services/memory/auto_memory.py` 后台运行，统计 `human_chat` 与 `bot_reply` 两类可计数消息。默认 `AUTO_MEMORY_TRIGGER_MESSAGE_COUNT=10`，达到阈值后构造一个只暴露 `add_memory` tool 的辅助 LLM 请求。只有辅助 LLM 完成审核，或实际执行了 `add_memory`，才推进 `auto_memory_last_context_msg_id` 水位；如果没有成功写入，就保留 pending 状态，下一轮继续尝试。
 
-4.缓存设计，音频视频逻辑
+## 4.缓存设计，音频视频逻辑
 
 缓存设计同样走统一主干：assembler 只声明语义 hint，router 计算稳定前缀，emitter 再映射到具体协议字段。主回复默认携带：
 
@@ -113,7 +133,7 @@ router 会把结构化请求切成 canonical units，计算稳定前缀 LCP，�
 
 多媒体兜底原则是“降级可读，不打断主链”。图片读取失败、媒体过大、协议不支持、系统工具缺失时，框架会尽量把该媒体替换成明确文本说明，让 LLM 知道这里发生了附件降级，而不是让整次回复报错退出。
 
-5.tool回路设计，内置tool讲解，tool开发介绍
+## 5.tool回路设计，内置tool讲解，tool开发介绍
 
 tool 主循环在 `services/tools/chain_executor.py`。它不是一次 LLM 调用后直接结束，而是一个闭环：
 
@@ -138,7 +158,7 @@ tool 主循环在 `services/tools/chain_executor.py`。它不是一次 LLM 调�
 
 开发新 tool 的推荐路径是：先在 `tool_runtime/tools/` 定义纯工具逻辑和 `ToolOutcome`；声明参数 schema 与配置 model；在 HCZ 注册层绑定 scope/capability/history strategy；把默认配置放进 YAML；最后用真实 `tool_registry.execute(...)` 验证成功、失败、越权、配置缺失四类返回。工具主干应复用 registry/bridge，不要绕开它直接读写业务状态。
 
-6.辅助功能：自动回复，语音，表情包
+## 6.辅助功能：自动回复，语音，表情包
 
 自动回复服务在 `services/ai_reply/service.py` 和 `MessageService.push_human_message()` 周边工作。私聊可以直接触发；群聊触发来源包括 @/is_tome、人格关键词、随机触发、内容规则，以及 group judge window。group judge window 会持久化到 `APP_SYSTEM_DIR/ai_reply/group_judge_window.json`，在配置的 TTL 内让 LLM 判断是否接话；判断失败按 fail-close 处理，不主动打扰群聊。
 
@@ -150,7 +170,7 @@ tool 主循环在 `services/tools/chain_executor.py`。它不是一次 LLM 调�
 
 这些辅助功能都属于“发送层增强”：主 LLM 回复、记忆、tool 链是主干；自动接话、语音、表情包只在合适时机增强表现力，失败时不得破坏主回复链。
 
-7.兜底处理逻辑
+## 7.兜底处理逻辑
 
 启动期兜底分为 fail-fast 和恢复两类。`run_bot.py`/初始化流程会检查数据库、adapter、新架构组件、系统依赖；`init_new_architecture()` 会先注册 tool，再补 context schema，初始化 memory，清理过期 quarantine，恢复 context window 状态。重启后会释放遗留的 `tool_chain_active`、`summary_generating` 等锁，避免旧进程中断导致新进程一直认为任务还在跑。
 
@@ -163,10 +183,6 @@ tool 兜底遵循结构化失败：缺工具、越权、参数错误、runtime �
 媒体兜底遵循可读替代：附件禁用、隔离、读取失败、超过限制、协议不支持、`ffmpeg/ffprobe` 不存在时，尽量生成文本 placeholder 或降级说明。这样模型仍能知道“用户发了一个无法直接读取的视频/文件”，但不会拿到不该暴露的宿主路径或中断回复。
 
 记忆兜底遵循不推进水位线原则。Stage1 潜意识路由失败时回到 legacy recall；Stage2 某一路 mem0 search 失败时保留其他召回；auto memory 只有在审核完成或 `add_memory` 成功后才推进处理水位。写入失败会留在后台队列/日志中，不把失败伪装成已记住。
-
-8.效果展示
-
-9.开始操作指南
 
 This repository is the Docker-deployable source tree for HCZ. Full project
 documentation is still being prepared; deployment guides are available in
