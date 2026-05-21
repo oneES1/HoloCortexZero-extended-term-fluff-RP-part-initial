@@ -254,20 +254,19 @@ WebUI 登录使用 `.env` 里的 `HCZ_ADMIN_USERNAME` 和 `HCZ_ADMIN_PASSWORD`�
 
 ### 9.1 适配器
 
+配置好你要用的适配器就行，不用就不管
 适配器只负责平台接入与平台侧身份声明，不决定最终上下文主键。必须先分清两个 ID：
 
-- 你的平台用户 ID：QQ 填 `OWNER_QQ_USER_ID`，Telegram 填 `OWNER_TG_USER_ID`，Matrix 填 `OWNER_MATRIX_USER_ID`。
+- 你的平台用户 ID（高级用户）
 - 智能体/机器人自己的平台账号：QQ/OneBot 填 `BOT_QQ`，Telegram 填 `BOT_TOKEN` 对应的 Bot，Matrix 填机器人 Matrix 账号与 token/password。
-
-这些平台侧高级用户 ID 会映射到系统设置里的 `ADVANCED_USER_ID`。不要把 `OWNER_*` 当成 HCZ 内部 context_id；高级用户跨平台、跨群聊的长期上下文锚点以 `ADVANCED_USER_ID` 为准，回复窗口仍由最后一次触发所在的 `chat_key` 决定。
 
 常用适配器检查点：
 
-- OneBot/QQ：进入 `onebot_v11` 适配器，配置 `BOT_QQ`、`OWNER_QQ_USER_ID`，再处理 NapCat 登录。`AUTO_ACCEPT_PRIVATE_REQUEST` 可接收好友请求；`AUTO_ACCEPT_GROUP_REQUEST` 默认关闭，是否回复仍看聊天频道是否激活和触发逻辑。
-- Telegram：配置 `BOT_TOKEN`、`OWNER_TG_USER_ID`，必要时填 `PROXY_URL`。`AUTO_ACCEPT_PRIVATE_CHAT` 只表示接收私聊 update；Telegram Bot 没有自动加入群聊 API，必须先把 bot 拉进群。
-- Matrix：配置机器人账号/token/password 与 `OWNER_MATRIX_USER_ID`；真实 Matrix room_id 只在适配器边界使用，进入 HCZ 后仍走统一身份主干。
+- OneBot/QQ：进入 `onebot_v11` 适配器，配置 `BOT_QQ`、`你的ID`，再处理 NapCat 登录
+- Telegram：配置 `BOT_TOKEN`、`你的ID`，必要时填 `PROXY_URL`
+- Matrix：配置机器人账号/token/password 与 `你的ID`
 
-首次接入建议先让目标平台账号给 bot 发一条普通消息，让系统创建 `DBUser` 和 `DBChatChannel`。然后到监控里的聊天频道列表确认 `chat_key`、`channel_name`、`is_active`。`is_active=false` 时消息仍可入库，但不会触发回复；用户管理里的封禁和禁止触发也会阻止回复。
+首次接入建议先让目标平台账号给 bot 发一条普通消息，让系统创建。然后到监控里的**聊天频道**列表确认消息可入库，绿色意味着打开了消息服务
 
 ### 9.2 LLM
 
@@ -296,57 +295,26 @@ LLM 页面管理 `MODEL_GROUPS`。每个 LLM 至少要确认这些字段：
 
 系统设置里必须配置你的身份，你的ID；你的昵称
 
+- 高级 context 主用户 ID；高级用户的 context_id 固定为它。
+- 高级用户在 prompt、附件提示和身份纠偏中的显示名。
+
 再配置模型路由：
 
-- `ADVANCED_USER_ID`：高级 context 主用户 ID；高级用户的 context_id 固定为它。
-- `ADVANCED_USER_DISPLAY_NAME`：高级用户在 prompt、附件提示和身份纠偏中的显示名。
-- `USE_MODEL_GROUP`：高级用户 `/norm` 与群聊默认回复你的 LLM。
-- `ADVANCED_CONTEXT_MODE_DEEK_MODEL_GROUP`：高级用户 `/cute` 与私聊默认回复你的 LLM，可为空回退。
-- `SYSTEM_THE_DEEP_MODEL_GROUP`：高级用户 `/puss` 的 Pro/deep LLM。
-- `NORMAL_USER_MODEL_GROUP`：普通用户触发时使用的 LLM。
-- `FALLBACK_MODEL_GROUP`：主 LLM 不可用时的备用 LLM。
-- `MULTIMODAL_MODEL_GROUP`：多模态优先 LLM，常用于 Gemini 等图片/音频/视频能力更完整的模型。
+- 高级用户 `/norm` 与群聊默认回复你的 LLM。
+- 高级用户 `/cute` 与私聊默认回复你的 LLM，可为空回退。
+- 高级用户 `/puss` 的 Pro/deep LLM。
+- 普通用户触发时使用的 LLM。
+- 主 LLM 不可用时的备用 LLM。
+- 多模态优先 LLM，常用于 Gemini 等图片/音频/视频能力更完整的模型。
 
-Prompt 也必须单独配置。WebUI 的“提示词”页读取系统配置里的隐藏 textarea 字段，入口包含这些 key：
 
-- `BOT_PERSONA_DISPLAY_NAME`：智能体昵称，影响协议展示、聊天记录落库和界面展示。
-- `MAIN_SYSTEM_PROMPT_ADVANCED`：高级用户 `/norm` 与群聊回复你的主人格 prompt。
-- `MAIN_SYSTEM_PROMPT_ADVANCED_DEEK`：高级用户 `/cute` 与私聊回复你的主人格 prompt；为空时回退 `MAIN_SYSTEM_PROMPT_ADVANCED`。
-- `MAIN_SYSTEM_PROMPT_ADVANCED_DEEP`：高级用户 `/puss` / Pro 模式主人格 prompt。
-- `MAIN_SYSTEM_PROMPT_NORMAL`：普通用户 context 使用的主人格 prompt。
-- `AI_REPLY_JUDGE_SYSTEM_PROMPT`：群聊是否接话的 judge prompt；为空时普通群聊 judge 默认 fail-close。
-- `SUBCONSCIOUS_SYSTEM_PROMPT`：Stage1 潜意识路由 prompt，影响本轮查什么记忆。
-- `AUTO_MEMORY_SYSTEM_PROMPT`：后台自动记忆 prompt，影响它是否调用 `add_memory`。
-- `MEMORY_ARBITER_SYSTEM_PROMPT`：记忆整理与冲突仲裁 prompt，模板必须保留 `{owner_context}`、`{chat_context}`、`{metadata_json}` 占位符。
-- `TIMELINE_SYSTEM_PROMPT`：上下文压缩摘要 prompt，影响摘要写法和后续历史恢复。
+### Prompt 也值得你单独配置，不然bot身份，昵称不明朗
 
-最小可用配置是先把 `BOT_PERSONA_DISPLAY_NAME`、`MAIN_SYSTEM_PROMPT_ADVANCED`、`MAIN_SYSTEM_PROMPT_ADVANCED_DEEK`、`MAIN_SYSTEM_PROMPT_ADVANCED_DEEP`、`MAIN_SYSTEM_PROMPT_NORMAL` 写成符合你角色设定的版本，再配辅助链 prompt。不要把工作流、tool 使用规则、记忆仲裁规则全部塞进主人格 prompt；tool、记忆、judge、timeline 已经有各自 prompt，混在一起会污染 RP 主上下文，也会降低缓存稳定性。
+最小可用配置是先写成符合你角色设定的版本，再配辅助链 prompt。不要把工作流、tool 使用规则、记忆仲裁规则全部塞进主人格 prompt；tool、记忆、judge、timeline 已经有各自 prompt，混在一起会污染 RP 主上下文，也会降低缓存稳定性。
 
-记忆相关最少要配：
+### 其他小功能
 
-- `TEXT_EMBEDDING_MODEL`：记忆向量嵌入 LLM。
-- `TEXT_EMBEDDING_DIMENSION`：向量维度，默认 1024。
-- `AUTO_MEMORY_ENABLED`：是否启用后台自动记忆。
-- `AUTO_MEMORY_MODEL_GROUP`：自动记忆辅助 LLM。
-- `AUTO_MEMORY_TRIGGER_MESSAGE_COUNT`：默认 10 条可计数上下文消息触发一次。
-- `AUTO_MEMORY_RECENT_MESSAGE_COUNT`：默认每次看最近 10 条。
-- `AUTO_MEMORY_MAX_TOOL_CALLS`：默认单批最多 8 个 `add_memory`。
-
-自动回复相关按场景调：
-
-- 私聊默认直通触发；群聊看 @、persona、随机、内容规则以及 judge。
-- `AI_REPLY_JUDGE_ENABLED` 开启后，群聊可用 `AI_REPLY_JUDGE_MODEL_GROUP` 做是否接话判断。
-- `AI_REPLY_JUDGE_ACTIVE_WINDOW_SECONDS` 默认 1800，只在主动唤起后的窗口内运行 judge；设 0 会恢复旧行为。
-- `AI_CHAT_RANDOM_REPLY_PROBABILITY`、`AI_CHAT_TRIGGER_REGEX`、`AI_CHAT_IGNORE_REGEX` 控制随机回复、内容触发和忽略规则。
-- `AI_REPLY_MULTIMODAL_TRIGGER_PATTERNS` 可让命中特定表达时临时切到多模态 LLM；音视频侧还有 `AI_REPLY_MULTIMODAL_MEDIA_MAX_SECONDS=60`、`AI_REPLY_MULTIMODAL_AUDIO_MAX_COUNT=4` 这类限制。
-
-语音和表情是发送层增强，失败不会破坏主回复链：
-
-- `SYSTEM_VOICE_ENABLED`、`SYSTEM_VOICE_TRIGGER_PROBABILITY`、`SYSTEM_VOICE_SHORT_TEXT_MAX_LEN=30` 控制短文本语音后处理。
-- `SYSTEM_VOICE_ALLOWED_ADAPTERS` 默认 `onebot_v11` 和 `telegram`。
-- `SYSTEM_VOICE_API_KEY`、`SYSTEM_VOICE_MODEL=cosyvoice-v3-flash`、`SYSTEM_VOICE_DEFAULT_VOICE_ID` 控制 DashScope CosyVoice。
-- `SYSTEM_VOICE_EMBEDDING_MODEL_GROUP` 用于 guidance 匹配。
-- `SYSTEM_EMOJI_ENABLED`、`SYSTEM_EMOJI_TRIGGER_PROBABILITY=0.02`、`SYSTEM_EMOJI_HOST_DIR`、`SYSTEM_EMOJI_EMBEDDING_MODEL_GROUP` 控制表情包匹配与发送。
+语音和表情是发送层增强，失败不会破坏主回复链，但也请配置来获得完整体验
 
 工具页面单独配置工具。天气、seek 搜索、magic draw、文件操作、屏蔽用户、Docker/系统辅助等工具都有自己的 schema、权限 scope 和 API key；工具配置缺失时应返回结构化错误，不应让主回复链崩溃。
 
