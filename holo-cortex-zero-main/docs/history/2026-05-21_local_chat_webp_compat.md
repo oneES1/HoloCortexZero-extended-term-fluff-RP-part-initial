@@ -1,4 +1,4 @@
-# 2026-05-21 local chat WEBP compatibility fix
+# 2026-05-21 universal WEBP compatibility fix
 
 ## Problem
 
@@ -20,32 +20,48 @@ user images. Single-image probes showed:
 
 Converting image 0 from WEBP to JPEG made the same local model return HTTP 200.
 
-## Change
+## Initial Local Chat Change
 
-`OpenAIChatEmitter._normalize_image_bytes` now treats WEBP as a chat image
-compatibility case in the existing normalization path:
+The first repair treated WEBP as a local chat image compatibility case:
 
 - WEBP is decoded through Pillow and emitted as JPEG when opaque.
 - WEBP with alpha/transparency is emitted as PNG.
 - Existing `local_chat_image_max_long_edge` resizing is preserved in the same
   path.
-- Logs now include a `reason` field such as `webp_compat`,
-  `oversized`, or `oversized+webp_compat`.
+- Local chat resize logs keep the existing `reason=oversized` marker.
 
 No provider-specific branch was added. The protocol mainline remains the
 existing chat image normalization function.
 
+## Follow-up Generalization
+
+The WEBP normalization is now moved from `OpenAIChatEmitter` to the router media
+preparation mainline so every model group and protocol gets the same behavior:
+
+- Location: `LLMRouter._normalize_image_bytes_for_compat_target`
+- Scope: all image parts after materialization, regardless of message role,
+  model group, or wire protocol
+- Output: `image/webp` is converted to `image/jpeg`
+- Alpha handling: transparent WEBP is composited on a white background before
+  JPEG encoding
+- Existing branch compatibility remains separate: uni-grok GIF still converts
+  to PNG only for that target
+
+The chat emitter no longer carries a WEBP-specific branch. It only keeps its
+existing oversized-image resize behavior.
+
 ## Verification
 
-- Function-level probe against the failed WEBP data URI returns
-  `data:image/jpeg`.
-- Replayed the previously failing dumped payload after normalizing through
-  `OpenAIChatEmitter._build_payload`; the local llama.cpp endpoint returned
-  HTTP 200 instead of HTTP 400.
+- Function-level probe against the failed WEBP data URI returns `image/jpeg`.
+- Replayed the previously failing dumped payload through the router plus chat
+  emitter; the local llama.cpp endpoint returned HTTP 200 instead of HTTP 400.
+- Router-level probes confirmed `chat`, `responses`, and `gemini` protocols all
+  receive `MessagePart(mime_type="image/jpeg")` before emitter serialization.
 
 ## Rollback
 
 Revert the commit that modifies:
 
 - `holo_cortex_zero/services/llm/openai_chat.py`
+- `holo_cortex_zero/services/llm/router.py`
 - `docs/history/2026-05-21_local_chat_webp_compat.md`

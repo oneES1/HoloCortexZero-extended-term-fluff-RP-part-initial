@@ -7,6 +7,7 @@
 
 主干说明：
 - 图片数量上限与图片物料化(base64 / inline bytes)在这里统一处理，避免按协议各修一份。
+- 图片格式兼容在路由层统一处理；例如 WEBP 统一转 JPEG 后再交给具体模型组协议发射器。
 - 各协议 emitter 只负责序列化差异；媒体限额、优先级与老图降级顺序由路由层统一决策。
 """
 from __future__ import annotations
@@ -264,9 +265,36 @@ class LLMRouter:
         source: str,
     ) -> tuple[str, bytes, bool]:
         mime = str(mime_type or "image/png").strip().lower() or "image/png"
-        if not data or mime != "image/gif":
+        if not data or not mime.startswith("image/"):
             return mime_type, data, False
-        if not _is_uni_grok_target(base_url=base_url, model=model):
+
+        # 主干：所有模型组统一拿 JPEG 形态的 WEBP，避免各协议 emitter 重复兼容。
+        if mime == "image/webp":
+            try:
+                with Image.open(io.BytesIO(data)) as image:
+                    image = ImageOps.exif_transpose(image)
+                    width, height = image.size
+                    normalized = image.convert("RGBA")
+                    background = Image.new("RGBA", normalized.size, (255, 255, 255, 255))
+                    background.alpha_composite(normalized)
+                    output = io.BytesIO()
+                    background.convert("RGB").save(output, format="JPEG", quality=90, optimize=True)
+                converted = output.getvalue()
+                logger.info(
+                    "[llm][image][compat] normalized WEBP -> JPEG for all model groups: "
+                    f"source={source} model={model} base_url={base_url} size={width}x{height} "
+                    f"bytes={len(data)} -> {len(converted)}"
+                )
+                return "image/jpeg", converted, True
+            except Exception as exc:
+                logger.warning(
+                    "[llm][image][compat] WEBP normalization failed, keep original: "
+                    f"source={source} model={model} base_url={base_url} err={exc}"
+                )
+                return mime_type, data, False
+
+        # 分支兼容：uni-grok 的 chat/responses 图片栈不稳定接收 GIF，统一转 PNG 后仍回主干。
+        if mime != "image/gif" or not _is_uni_grok_target(base_url=base_url, model=model):
             return mime_type, data, False
 
         try:
@@ -289,7 +317,7 @@ class LLMRouter:
             return mime_type, data, False
 
     @classmethod
-    def _normalize_user_images_for_compat_target_in_place(
+    def _normalize_images_for_compat_target_in_place(
         cls,
         messages: list[MessageTurn],
         *,
@@ -300,8 +328,6 @@ class LLMRouter:
     ) -> int:
         converted = 0
         for turn_index, turn in enumerate(messages):
-            if turn.role != "user":
-                continue
             for part_index, part in enumerate(turn.parts):
                 if part.type != "image" or part.data is None:
                     continue
@@ -1338,7 +1364,7 @@ class LLMRouter:
         return mime_type, data
 
     @classmethod
-    async def _materialize_user_images_in_place(
+    async def _materialize_images_in_place(
         cls,
         messages: list[MessageTurn],
         *,
@@ -1353,8 +1379,6 @@ class LLMRouter:
         http_client: Optional[httpx.AsyncClient] = None
         try:
             for turn in messages:
-                if turn.role != "user":
-                    continue
                 for index, part in enumerate(turn.parts):
                     if part.type != "image":
                         continue
@@ -1415,6 +1439,10 @@ class LLMRouter:
         extra_params = dict(request.extra_params) if isinstance(request.extra_params, dict) else {}
         image_max_count = self._extract_internal_image_max_count(extra_params)
         sanitized_extra_params = self._strip_internal_extra_params(extra_params)
+        has_images = any(
+            any(part.type == "image" for part in turn.parts)
+            for turn in request.messages
+        )
         has_user_images = any(
             turn.role == "user" and any(part.type == "image" for part in turn.parts)
             for turn in request.messages
@@ -1425,7 +1453,7 @@ class LLMRouter:
         )
         extra_params_changed = sanitized_extra_params != extra_params
 
-        if not has_user_images and not has_user_media and not extra_params_changed:
+        if not has_images and not has_user_media and not extra_params_changed:
             return request
 
         prepared = self._clone_request(request, extra_params=sanitized_extra_params)
@@ -1438,7 +1466,8 @@ class LLMRouter:
                 protocol=protocol,
                 model=request.model,
             )
-            await self._materialize_user_images_in_place(
+        if has_images:
+            await self._materialize_images_in_place(
                 prepared.messages,
                 context_id=request.context_id,
                 protocol=protocol,
@@ -1446,7 +1475,7 @@ class LLMRouter:
                 proxy=proxy,
                 timeout=timeout,
             )
-            self._normalize_user_images_for_compat_target_in_place(
+            self._normalize_images_for_compat_target_in_place(
                 prepared.messages,
                 context_id=request.context_id,
                 protocol=protocol,

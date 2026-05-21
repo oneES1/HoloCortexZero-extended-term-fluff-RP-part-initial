@@ -624,14 +624,12 @@ class OpenAIChatEmitter(BaseEmitter):
                 image = ImageOps.exif_transpose(image)
                 width, height = image.size
                 should_resize = bool(max_long_edge and max_long_edge > 0 and max(width, height) > max_long_edge)
-                should_transcode_webp = mime == "image/webp"
-                if not should_resize and not should_transcode_webp:
+                if not should_resize:
                     if mime == "image/jpg":
                         return "image/jpeg", data
                     return mime_type, data
                 resized = image.copy()
-                if should_resize:
-                    resized.thumbnail((max_long_edge, max_long_edge), Image.Resampling.LANCZOS)
+                resized.thumbnail((max_long_edge, max_long_edge), Image.Resampling.LANCZOS)
                 new_width, new_height = resized.size
                 has_alpha = "A" in resized.getbands() or "transparency" in resized.info
                 output = io.BytesIO()
@@ -647,8 +645,6 @@ class OpenAIChatEmitter(BaseEmitter):
                 reasons = []
                 if should_resize:
                     reasons.append("oversized")
-                if should_transcode_webp:
-                    reasons.append("webp_compat")
                 logger.info(
                     "[openai_chat][image] normalized image for chat target: "
                     f"reason={'+'.join(reasons)} "
