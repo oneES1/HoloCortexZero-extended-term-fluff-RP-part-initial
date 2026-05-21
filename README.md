@@ -3,10 +3,15 @@
 HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是真正HCZ的起步练习作。从26年1月15号左右上线第一版，快速迭代和维护，特点是：
 
 1.只需要18K上下文就可完成至少超过4个月的**无感无缝长期记忆**工程实测验证，内测用户汇报效果超出预期
+
 2.上下文在**多人类用户跨群聊/平台**时仍原生保证连贯；无需担心多群聊私聊并发冲突。无需担心bot不记得刚刚在另一个消息平台的私聊内容
-3.支持思维链回填，支持多种缓存协议；缓存率80%～95%，允许随时切换gemini全模态 Deepseek v4 toolcall，responses，chat等发射器协议
+
+3.支持思维链回填，支持多种缓存协议；缓存率80%～95%，允许随时切换 gemini协议 全模态（图片语音视频），deepseek-v4 toolcall，responses，chat等发射器协议
+
 4.为长期RP优化记忆：图谱索引+LLM检索+embedding，代码与仲裁LLM结合保证**复杂多用户鲁棒性**
-5.配置管理简单；payload框架担保回复可用性。支持原生图片语音交互；tool扩展；支持状态追踪；异常兜底强，报错也继续运行
+
+5.配置管理简单；支持LLM状态追踪；payload框架担保回复可用性；tool可扩展可配置；异常兜底强，报错也继续运行；
+
 6智能体协作：主RP发言bot，auto_memory, memory_judge, 检索记忆LLM，自动接话，后台静默压缩（根据TTFT，decode速度，KV缓存，智力，思维链，多模态等特性决定）按需求自动编排并发
 
 ## HoloCortexZero最终目的在以年为单位长程通用的，可自主发现创新，自主产出落地，自主社交规划的基于序列模型搭建的（当前LLM主流阶段）以agentic框架叙述，共4个阶段
@@ -25,6 +30,9 @@ HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是
 6.记忆系统多结构需求**针对性优化**不能通用糊弄
 7.test time **skill分层快与慢学习与应用**避免token/推理资源浪费，同时固化长期skill习惯，skill相关排布由专门负责，仍然禁止过度污染其他智能体，严格隔离分工
 8.联想与记忆的注入非常重要，但具体落实时具体务实分析
+
+## Mac/Win 客户端程序下载地址见：（做好了会在这写）
+## Linux源码部署文档：[Chinese](README_DEPLOY.md) and [English](README_DEPLOY_EN.md).
 
 # 目录
 0.RP part宗旨：
@@ -211,9 +219,11 @@ tool 兜底遵循结构化失败：缺工具、越权、参数错误、runtime �
 
 记忆兜底遵循不推进水位线原则。Stage1 潜意识路由失败时回到 legacy recall；Stage2 某一路 mem0 search 失败时保留其他召回；auto memory 只有在审核完成或 `add_memory` 成功后才推进处理水位。写入失败会留在后台队列/日志中，不把失败伪装成已记住。
 
-This repository is the Docker-deployable source tree for HCZ. Full project
-documentation is still being prepared; deployment guides are available in
-[Chinese](README_DEPLOY.md) and [English](README_DEPLOY_EN.md).
+## 8.效果展示
+
+
+## 9.开始操作指南
+
 
 
 
