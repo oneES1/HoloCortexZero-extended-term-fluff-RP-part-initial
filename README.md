@@ -44,7 +44,7 @@ HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是
 
 3.长短期记忆与回忆设计
 
-4.缓存设计，音频视频逻辑
+4.缓存设计，图片降级与缓存关系，音频视频逻辑
 
 5.tool回路设计，内置tool讲解，tool开发介绍
 
@@ -160,7 +160,7 @@ tool 链持久化时，assistant 纯文本回复会把隐藏思考写到 meta-on
 
 auto_memory 会通过 `dump_memory_json("auto_memory", "request/response/tool_call", ...)` 保存请求 wire payload、上下文源消息、recall_text、模型返回、执行过的 tool calls 和 resolved env。`AUTO_MEMORY_DEBUG_LOG_PAYLOAD=true` 时还会打印截断预览，默认日志上限 `AUTO_MEMORY_PAYLOAD_LOG_MAX_CHARS=12000`。这些证据只用于调试，不进入主聊天 payload。
 
-## 4.缓存设计，音频视频逻辑
+## 4.缓存设计，图片降级与缓存关系，音频视频逻辑
 
 缓存设计同样走统一主干：assembler 只声明语义 hint，router 计算稳定前缀，emitter 再映射到具体协议字段。主回复默认携带：
 
@@ -169,6 +169,14 @@ auto_memory 会通过 `dump_memory_json("auto_memory", "request/response/tool_ca
 - `cache_domain=main:{owner_type}:{mode}` 这一类调用方传入的域信息
 
 router 会把结构化请求切成 canonical units，计算稳定前缀 LCP，并维护最多 128 个 prefix snapshot。这样同一 context 的 system/persona/摘要/历史稳定部分可以尽量命中缓存，而最新用户输入仍保持在 payload 末尾。不同供应商的差异被限制在 emitter：Responses 可映射 `cache_control`，chat 可按 cache profile 映射 `cache_control` 或 `prompt_cache_key`，uni-grok 可用 `prompt_cache_key` 兼容，deepseek/local 等按各自能力跳过或调整字段。
+
+### 图片降级与缓存关系
+
+图片降级发生在缓存计算前，不是 emitter 临时拼协议时才处理。`LLMRouter.generate()` 和 `generate_stream()` 都先跑 `_prepare_request()`，在这里完成 `IMAGE_MAX_COUNT` 数量限制、单图内联 `25_000_000 bytes` 上限检查、远程/本地图片物化、WEBP -> JPEG、uni-grok GIF -> PNG 兼容；随后才进入 `_apply_canonical_cache_prefix_hints()` 计算 canonical LCP 和 prefix snapshot，最后交给 emitter 序列化。
+
+因此缓存绑定的是“模型实际看到的后策略 IR”，不是原始附件状态。超出数量、读不到、超过 `25_000_000 bytes` 或格式兼容失败的图片，会先变成 `[图片...降级]` 文本 part；这些文本 part 会正常进入 canonical units。相同历史在“图片仍保留”和“图片已降级”两种状态下不应共用缓存，因为模型看到的上下文已经不同；反过来，重复出现的同一降级结果可以命中稳定前缀，避免缓存被不稳定 URL、过大原图字节或 emitter 差异污染。
+
+图片限额分两层：`IMAGE_MAX_COUNT` 只管每次请求送入模型的 user 图片数量，正数限额下内置系统形象参考图优先保留，普通图片按从旧到新降级；单图字节由 router 的 `25_000_000 bytes` 内联上限兜底。接收/适配器层还有 `MAX_UPLOAD_SIZE_MB=10` 这类上传限制，但主回复缓存只认 router 处理后的 `GenerationRequest`。
 
 附件进入框架前先走 `services/file_system/policy.py`：
 
