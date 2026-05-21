@@ -270,47 +270,50 @@ WebUI 登录使用 `.env` 里的 `HCZ_ADMIN_USERNAME` 和 `HCZ_ADMIN_PASSWORD`�
 
 ### 9.2 LLM
 
-LLM 页面管理 `MODEL_GROUPS`。每个 LLM 至少要确认这些字段：
+LLM 页面就是“模型供应商配置”。新手先不要管所有高级项，按下面顺序填到能测试通过：
 
-- `GROUP_NAME`：配置组名称，也是其他设置引用的 key。
-- `MODEL_TYPE`：`chat`、`embedding` 或 `draw`。
-- `CHAT_MODEL`、`BASE_URL`、`API_KEY`：模型名、协议地址和密钥。
-- `USE_GLOBAL_PROXY` / `CHAT_PROXY`：是否使用系统 `DEFAULT_PROXY`，或给该 LLM 单独设置代理。
-- `WIRE_API`：默认自动判定；需要固定协议时显式选 `chat`、`responses` 或 `gemini`。
+- 先起一个好认的 LLM 名字，例如“主聊天模型”“记忆向量模型”“画图模型”。
+- 模型类型要选对：聊天用 `chat`，记忆/表情/语音匹配用 `embedding`，绘图用 `draw`。
+- 填模型名称、API 地址、API Key；连不通时基本先查这三项。
+- 如果访问供应商需要代理，优先打开“启用全局代理”；只有这个 LLM 要特殊代理时，再单独填聊天模型访问代理。
+- 协议发射器新手保持默认；明确知道供应商必须走 `chat`、`responses` 或 `gemini` 时再手动指定。
 
-建议先建一个可连通的 `chat` LLM，再建一个可连通的 `embedding` LLM。记忆检索强依赖 `TEXT_EMBEDDING_MODEL` 指向可用 embedding LLM；不配置或维度不匹配时，长期记忆、表情匹配、语音 guidance 匹配都会受影响。`TEXT_EMBEDDING_DIMENSION` 默认 1024，必须和实际 embedding 模型输出维度一致。
+建议先建一个能正常回复的聊天 LLM，再建一个能正常返回向量的 embedding LLM。记忆检索强依赖 embedding LLM；不配置或维度不匹配时，长期记忆、表情匹配、语音 guidance 匹配都会受影响。记忆嵌入维度默认 1024，必须和实际 embedding 模型输出维度一致。
 
-模型组连不通时，优先检查 `BASE_URL`、`API_KEY`、`CHAT_MODEL`、代理和协议。DeepSeek 这类会返回 `reasoning_content` 且参与 tool 链的思考模型，需要在该 LLM 上开启 `REPLAY_REASONING_CONTENT`，否则后续 tool 请求可能丢失必要的思维链回填；不明确支持该字段的模型不要随手开启。
+模型连不通时，优先检查 API 地址、API Key、模型名称、代理和协议。DeepSeek 这类会返回 `reasoning_content` 且参与 tool 链的思考模型，需要在该 LLM 上开启“回放思维链”，否则后续 tool 请求可能丢失必要的思维链回填；不明确支持该能力的模型不要随手开启。
 
-图片相关配置分两层看：
+图片相关配置分两层看，新手主要改界面里的“图片数量上限”：
 
-- `IMAGE_MAX_COUNT` 是单次请求送给模型的 user 图片数量上限；空表示不限，0 表示不发图，正整数表示超出部分按从旧到新降级为文本。
+- “图片数量上限”是单次请求送给模型的用户图片数量；空表示不限，0 表示不发图，正整数表示超出部分按从旧到新降级为文本。
 - 单图字节上限由 router 兜底为 `25_000_000 bytes`；上传入口还可能受 `MAX_UPLOAD_SIZE_MB=10` 影响。
 
-如果某个供应商在图片上下文中频繁失败，先把该 LLM 的 `IMAGE_MAX_COUNT` 调小，而不是改代码。图片降级发生在缓存计算前，降级后的文本说明会参与 canonical cache，因此“图片保留”和“图片降级”不会误共用缓存。
+如果某个供应商在图片上下文中频繁失败，先把该 LLM 的“图片数量上限”调小，而不是改代码。图片降级发生在缓存计算前，降级后的文本说明会参与 canonical cache，因此“图片保留”和“图片降级”不会误共用缓存。
 
-`EXTRA_BODY` 是 JSON 透传参数，适合放供应商特有字段；先用最小字段跑通连通性，再逐项加入。`CACHE_TRANSPORT_PROFILE` 只控制 cache hint 如何映射到协议字段，不改变主 payload 组装语义。
+“额外参数 (JSON)”适合放供应商特有字段；先用最小字段跑通连通性，再逐项加入。“缓存传输策略”只控制 cache hint 如何映射到协议字段，不改变主 payload 组装语义。
 
 ### 9.3 系统设置
 
-系统设置里必须配置你的身份，你的ID；你的昵称
+系统设置里先配置“你是谁”。这里的“你”是高级用户，也就是长期陪伴/RP 的主用户：
 
-- 高级 context 主用户 ID；高级用户的 context_id 固定为它。
-- 高级用户在 prompt、附件提示和身份纠偏中的显示名。
+- “对智能体的统一 ID 标识”：填一个稳定 ID。它会成为高级上下文的长期记忆锚点，不要今天填 QQ 号、明天填 TG 号来回换。
+- “你对智能体的统一昵称”：填 bot 在 prompt、附件提示、身份纠偏里称呼你的名字。
+- 消息平台里的“你的 ID”要在适配器页填；系统设置里的统一 ID 是 HCZ 内部长期上下文身份。两者可以映射，但不是同一个配置位。
 
-再配置模型路由：
+然后配置“谁来回复”。这些都是下拉选择前面 LLM 页面里已经建好的模型：
 
-- 高级用户 `/norm` 与群聊默认回复你的 LLM。
-- 高级用户 `/cute` 与私聊默认回复你的 LLM，可为空回退。
-- 高级用户 `/puss` 的 Pro/deep LLM。
-- 普通用户触发时使用的 LLM。
-- 主 LLM 不可用时的备用 LLM。
-- 多模态优先 LLM，常用于 Gemini 等图片/音频/视频能力更完整的模型。
+- “群聊里回复你的 LLM”：你在群里触发，或发送 `/norm` 后使用的主模型。
+- “私聊回复你的 LLM”：你在私聊触发，或发送 `/cute` 后使用的模型；不填就回退到群聊主模型。
+- “你专用的高级 LLM”：发送 `/puss` 后使用的 Pro/deep 模型。
+- “回复其他人的 LLM”：普通用户触发时使用的模型。
+- “备用 LLM”：主模型失败时自动切过去的兜底模型。
+- “多模态 LLM”：处理图片、音频、视频更强的模型，常见选择是 Gemini 这类多模态模型。
 
 
 ### Prompt 也值得你单独配置，不然bot身份，昵称不明朗
 
-最小可用配置是先写成符合你角色设定的版本，再配辅助链 prompt。不要把工作流、tool 使用规则、记忆仲裁规则全部塞进主人格 prompt；tool、记忆、judge、timeline 已经有各自 prompt，混在一起会污染 RP 主上下文，也会降低缓存稳定性。
+提示词页优先填“主人格”相关内容：智能体昵称、群聊回复你的 norm 人格、私聊回复你的 cute 人格、`/puss` 的 Pro 人格、普通用户人格。先把这些写成符合你角色设定的版本，再配辅助链 prompt。
+
+不要把工作流、tool 使用规则、记忆仲裁规则全部塞进主人格 prompt；tool、记忆、judge、timeline 已经有各自 prompt，混在一起会污染 RP 主上下文，也会降低缓存稳定性。记忆仲裁 prompt 这类模板如果看到 `{owner_context}`、`{chat_context}`、`{metadata_json}` 这种占位符，不要删。
 
 ### 其他小功能
 
@@ -323,23 +326,23 @@ LLM 页面管理 `MODEL_GROUPS`。每个 LLM 至少要确认这些字段：
 推荐按这个顺序验证：
 
 1. LLM 页面保存一个 `chat` LLM，点连通性测试，确认返回正常。
-2. LLM 页面保存一个 `embedding` LLM，并在系统设置里填 `TEXT_EMBEDDING_MODEL`。
-3. 系统设置里填 `ADVANCED_USER_ID`、`ADVANCED_USER_DISPLAY_NAME`、`USE_MODEL_GROUP`、`NORMAL_USER_MODEL_GROUP`、`FALLBACK_MODEL_GROUP`。
+2. LLM 页面保存一个 `embedding` LLM，然后在系统设置里把“记忆向量嵌入模型”选成它。
+3. 系统设置里填你的统一 ID、统一昵称，并选择“群聊里回复你的 LLM”“回复其他人的 LLM”“备用 LLM”。
 4. 提示词页先填主人格 prompt：高级 norm/cute/deep、普通用户 prompt，以及智能体昵称。
 5. 配好一个消息平台适配器，让你的真实平台账号先私聊 bot 一句，确认用户和频道被创建。
-6. 到监控里的聊天频道列表确认 `is_active=true`。
+6. 到监控里的聊天频道列表确认该频道是开启状态。
 7. 私聊发送普通文本测试主回复；群聊先用 @ 或触发词测试，不要一开始依赖随机回复。
-8. 再测图片；如果失败，先调该 LLM 的 `IMAGE_MAX_COUNT`，再检查模型是否支持图像协议。
+8. 再测图片；如果失败，先调该 LLM 的“图片数量上限”，再检查模型是否支持图像协议。
 9. 最后再开自动记忆、语音、表情包和工具。
 
 排错优先级：
 
 - 没有入库：查适配器凭证、Bot 是否在线、平台是否真的把消息送到适配器。
-- 入库但不回复：查聊天频道 `is_active`、用户是否被封禁/禁止触发、群聊触发条件、tool 链是否正在运行。
-- 回复报模型错误：查 LLM 连通性、协议、API key、代理、`IMAGE_MAX_COUNT`、`REPLAY_REASONING_CONTENT`。
-- 人设不对或模式错乱：查 `BOT_PERSONA_DISPLAY_NAME`、`MAIN_SYSTEM_PROMPT_ADVANCED*`、`MAIN_SYSTEM_PROMPT_NORMAL`，再查 `/norm`、`/cute`、`/puss` 当前模式和 LLM 路由。
-- 记忆不生效：查 `TEXT_EMBEDDING_MODEL`、`TEXT_EMBEDDING_DIMENSION`、Qdrant、auto_memory 水位和记忆仲裁日志。
-- 记忆写入奇怪：查 `AUTO_MEMORY_SYSTEM_PROMPT` 和 `MEMORY_ARBITER_SYSTEM_PROMPT`，确认仲裁模板占位符没有被删。
+- 入库但不回复：查聊天频道是否开启、用户是否被封禁/禁止触发、群聊触发条件、tool 链是否正在运行。
+- 回复报模型错误：查 LLM 连通性、协议、API key、代理、图片数量上限、是否误开/漏开“回放思维链”。
+- 人设不对或模式错乱：查提示词页的智能体昵称、群聊/私聊/Pro/普通用户人格，再查 `/norm`、`/cute`、`/puss` 当前模式和 LLM 路由。
+- 记忆不生效：查记忆向量嵌入模型、向量维度、Qdrant、auto_memory 水位和记忆仲裁日志。
+- 记忆写入奇怪：查自动记忆 prompt 和记忆仲裁 prompt，确认仲裁模板占位符没有被删。
 - 语音/表情不生效：查对应开关、概率、embedding LLM、表情目录、CosyVoice key，以及当前适配器是否在允许列表内。
 
 ## License
