@@ -54,7 +54,7 @@ HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是
 
 8.效果展示
 
-9.开始操作指南
+9.开始操作指南（登录，适配器，LLM，设置，验证）
 
 # 架构展开
 
@@ -244,23 +244,115 @@ tool 兜底遵循结构化失败：缺工具、越权、参数错误、runtime �
 
 ## 9.开始操作指南
 
-bilibili视频教学（如果我做了）：
+本节只讲 Docker 部署已经启动后的 WebUI 配置顺序；首次安装、端口、密码生成、数据目录和离线发布包仍看 `README_DEPLOY.md`。bilibili 视频教学如果后续补，会放在这里。
 
-请用你配置的账户密码登录，左上角logo可点击进入配置。
+### 9.0 登录与配置入口
 
-我们需要重点关注：消息平台适配器（onebot是QQ），模型组，设置
+WebUI 登录使用 `.env` 里的 `HCZ_ADMIN_USERNAME` 和 `HCZ_ADMIN_PASSWORD`；安装脚本会生成或要求设置强密码，容器入口会拒绝空值、`change_me_*` 和 `123456` 这类公开弱默认。登录后左上角 Logo / 顶部导航可进入配置区，主要关注三块：消息平台适配器、LLM、系统设置。
 
-1 适配器，登陆凭证后：
-    请必须配置**你自己的**消息平台用户ID；2.然后配置你的RP 角色的消息平台用户ID
+配置保存后，不是所有字段都需要重启。一般 LLM 和系统运行配置可直接保存后测试；适配器凭证、Bot Token、QQ/NapCat 登录状态、Telegram 代理这类初始化参数，保存后如果页面提示或适配器仍未初始化，就只重启 HCZ 后端本体，不要重建数据库/Qdrant。
 
-2 模型组
-    请使用连通性ok的模型组，连不通请检查API key，以及协议，配置是否有误（例如deepseek得开启思维回填），特别注意图像数量限制：如果你聊天中遇到该LLM调用失败，请约束最大历史图片数量，增加网关兼容性。额外字段有透传并覆盖作用，有能力可自行测试
+### 9.1 适配器
 
-    嵌入模型必须配置可用，记忆强依赖，不配置就不生效。表情包与语音也依赖
+适配器只负责平台接入与平台侧身份声明，不决定最终上下文主键。必须先分清两个 ID：
 
+- 你的平台用户 ID：QQ 填 `OWNER_QQ_USER_ID`，Telegram 填 `OWNER_TG_USER_ID`，Matrix 填 `OWNER_MATRIX_USER_ID`。
+- 智能体/机器人自己的平台账号：QQ/OneBot 填 `BOT_QQ`，Telegram 填 `BOT_TOKEN` 对应的 Bot，Matrix 填机器人 Matrix 账号与 token/password。
 
-3 设置
-    
+这些平台侧高级用户 ID 会映射到系统设置里的 `ADVANCED_USER_ID`。不要把 `OWNER_*` 当成 HCZ 内部 context_id；高级用户跨平台、跨群聊的长期上下文锚点以 `ADVANCED_USER_ID` 为准，回复窗口仍由最后一次触发所在的 `chat_key` 决定。
+
+常用适配器检查点：
+
+- OneBot/QQ：进入 `onebot_v11` 适配器，配置 `BOT_QQ`、`OWNER_QQ_USER_ID`，再处理 NapCat 登录。`AUTO_ACCEPT_PRIVATE_REQUEST` 可接收好友请求；`AUTO_ACCEPT_GROUP_REQUEST` 默认关闭，是否回复仍看聊天频道是否激活和触发逻辑。
+- Telegram：配置 `BOT_TOKEN`、`OWNER_TG_USER_ID`，必要时填 `PROXY_URL`。`AUTO_ACCEPT_PRIVATE_CHAT` 只表示接收私聊 update；Telegram Bot 没有自动加入群聊 API，必须先把 bot 拉进群。
+- Matrix：配置机器人账号/token/password 与 `OWNER_MATRIX_USER_ID`；真实 Matrix room_id 只在适配器边界使用，进入 HCZ 后仍走统一身份主干。
+
+首次接入建议先让目标平台账号给 bot 发一条普通消息，让系统创建 `DBUser` 和 `DBChatChannel`。然后到监控里的聊天频道列表确认 `chat_key`、`channel_name`、`is_active`。`is_active=false` 时消息仍可入库，但不会触发回复；用户管理里的封禁和禁止触发也会阻止回复。
+
+### 9.2 LLM
+
+LLM 页面管理 `MODEL_GROUPS`。每个 LLM 至少要确认这些字段：
+
+- `GROUP_NAME`：配置组名称，也是其他设置引用的 key。
+- `MODEL_TYPE`：`chat`、`embedding` 或 `draw`。
+- `CHAT_MODEL`、`BASE_URL`、`API_KEY`：模型名、协议地址和密钥。
+- `USE_GLOBAL_PROXY` / `CHAT_PROXY`：是否使用系统 `DEFAULT_PROXY`，或给该 LLM 单独设置代理。
+- `WIRE_API`：默认自动判定；需要固定协议时显式选 `chat`、`responses` 或 `gemini`。
+
+建议先建一个可连通的 `chat` LLM，再建一个可连通的 `embedding` LLM。记忆检索强依赖 `TEXT_EMBEDDING_MODEL` 指向可用 embedding LLM；不配置或维度不匹配时，长期记忆、表情匹配、语音 guidance 匹配都会受影响。`TEXT_EMBEDDING_DIMENSION` 默认 1024，必须和实际 embedding 模型输出维度一致。
+
+模型组连不通时，优先检查 `BASE_URL`、`API_KEY`、`CHAT_MODEL`、代理和协议。DeepSeek 这类会返回 `reasoning_content` 且参与 tool 链的思考模型，需要在该 LLM 上开启 `REPLAY_REASONING_CONTENT`，否则后续 tool 请求可能丢失必要的思维链回填；不明确支持该字段的模型不要随手开启。
+
+图片相关配置分两层看：
+
+- `IMAGE_MAX_COUNT` 是单次请求送给模型的 user 图片数量上限；空表示不限，0 表示不发图，正整数表示超出部分按从旧到新降级为文本。
+- 单图字节上限由 router 兜底为 `25_000_000 bytes`；上传入口还可能受 `MAX_UPLOAD_SIZE_MB=10` 影响。
+
+如果某个供应商在图片上下文中频繁失败，先把该 LLM 的 `IMAGE_MAX_COUNT` 调小，而不是改代码。图片降级发生在缓存计算前，降级后的文本说明会参与 canonical cache，因此“图片保留”和“图片降级”不会误共用缓存。
+
+`EXTRA_BODY` 是 JSON 透传参数，适合放供应商特有字段；先用最小字段跑通连通性，再逐项加入。`CACHE_TRANSPORT_PROFILE` 只控制 cache hint 如何映射到协议字段，不改变主 payload 组装语义。
+
+### 9.3 系统设置
+
+系统设置里先配置身份，再配置模型路由：
+
+- `ADVANCED_USER_ID`：高级 context 主用户 ID；高级用户的 context_id 固定为它。
+- `ADVANCED_USER_DISPLAY_NAME`：高级用户在 prompt、附件提示和身份纠偏中的显示名。
+- `USE_MODEL_GROUP`：高级用户 `/norm` 与群聊默认回复你的 LLM。
+- `ADVANCED_CONTEXT_MODE_DEEK_MODEL_GROUP`：高级用户 `/cute` 与私聊默认回复你的 LLM，可为空回退。
+- `SYSTEM_THE_DEEP_MODEL_GROUP`：高级用户 `/puss` 的 Pro/deep LLM。
+- `NORMAL_USER_MODEL_GROUP`：普通用户触发时使用的 LLM。
+- `FALLBACK_MODEL_GROUP`：主 LLM 不可用时的备用 LLM。
+- `MULTIMODAL_MODEL_GROUP`：多模态优先 LLM，常用于 Gemini 等图片/音频/视频能力更完整的模型。
+
+记忆相关最少要配：
+
+- `TEXT_EMBEDDING_MODEL`：记忆向量嵌入 LLM。
+- `TEXT_EMBEDDING_DIMENSION`：向量维度，默认 1024。
+- `AUTO_MEMORY_ENABLED`：是否启用后台自动记忆。
+- `AUTO_MEMORY_MODEL_GROUP`：自动记忆辅助 LLM。
+- `AUTO_MEMORY_TRIGGER_MESSAGE_COUNT`：默认 10 条可计数上下文消息触发一次。
+- `AUTO_MEMORY_RECENT_MESSAGE_COUNT`：默认每次看最近 10 条。
+- `AUTO_MEMORY_MAX_TOOL_CALLS`：默认单批最多 8 个 `add_memory`。
+
+自动回复相关按场景调：
+
+- 私聊默认直通触发；群聊看 @、persona、随机、内容规则以及 judge。
+- `AI_REPLY_JUDGE_ENABLED` 开启后，群聊可用 `AI_REPLY_JUDGE_MODEL_GROUP` 做是否接话判断。
+- `AI_REPLY_JUDGE_ACTIVE_WINDOW_SECONDS` 默认 1800，只在主动唤起后的窗口内运行 judge；设 0 会恢复旧行为。
+- `AI_CHAT_RANDOM_REPLY_PROBABILITY`、`AI_CHAT_TRIGGER_REGEX`、`AI_CHAT_IGNORE_REGEX` 控制随机回复、内容触发和忽略规则。
+- `AI_REPLY_MULTIMODAL_TRIGGER_PATTERNS` 可让命中特定表达时临时切到多模态 LLM；音视频侧还有 `AI_REPLY_MULTIMODAL_MEDIA_MAX_SECONDS=60`、`AI_REPLY_MULTIMODAL_AUDIO_MAX_COUNT=4` 这类限制。
+
+语音和表情是发送层增强，失败不会破坏主回复链：
+
+- `SYSTEM_VOICE_ENABLED`、`SYSTEM_VOICE_TRIGGER_PROBABILITY`、`SYSTEM_VOICE_SHORT_TEXT_MAX_LEN=30` 控制短文本语音后处理。
+- `SYSTEM_VOICE_ALLOWED_ADAPTERS` 默认 `onebot_v11` 和 `telegram`。
+- `SYSTEM_VOICE_API_KEY`、`SYSTEM_VOICE_MODEL=cosyvoice-v3-flash`、`SYSTEM_VOICE_DEFAULT_VOICE_ID` 控制 DashScope CosyVoice。
+- `SYSTEM_VOICE_EMBEDDING_MODEL_GROUP` 用于 guidance 匹配。
+- `SYSTEM_EMOJI_ENABLED`、`SYSTEM_EMOJI_TRIGGER_PROBABILITY=0.02`、`SYSTEM_EMOJI_HOST_DIR`、`SYSTEM_EMOJI_EMBEDDING_MODEL_GROUP` 控制表情包匹配与发送。
+
+工具页面单独配置工具。天气、seek 搜索、magic draw、文件操作、屏蔽用户、Docker/系统辅助等工具都有自己的 schema、权限 scope 和 API key；工具配置缺失时应返回结构化错误，不应让主回复链崩溃。
+
+### 9.4 验证顺序
+
+推荐按这个顺序验证：
+
+1. LLM 页面保存一个 `chat` LLM，点连通性测试，确认返回正常。
+2. LLM 页面保存一个 `embedding` LLM，并在系统设置里填 `TEXT_EMBEDDING_MODEL`。
+3. 系统设置里填 `ADVANCED_USER_ID`、`ADVANCED_USER_DISPLAY_NAME`、`USE_MODEL_GROUP`、`NORMAL_USER_MODEL_GROUP`、`FALLBACK_MODEL_GROUP`。
+4. 配好一个消息平台适配器，让你的真实平台账号先私聊 bot 一句，确认用户和频道被创建。
+5. 到监控里的聊天频道列表确认 `is_active=true`。
+6. 私聊发送普通文本测试主回复；群聊先用 @ 或触发词测试，不要一开始依赖随机回复。
+7. 再测图片；如果失败，先调该 LLM 的 `IMAGE_MAX_COUNT`，再检查模型是否支持图像协议。
+8. 最后再开自动记忆、语音、表情包和工具。
+
+排错优先级：
+
+- 没有入库：查适配器凭证、Bot 是否在线、平台是否真的把消息送到适配器。
+- 入库但不回复：查聊天频道 `is_active`、用户是否被封禁/禁止触发、群聊触发条件、tool 链是否正在运行。
+- 回复报模型错误：查 LLM 连通性、协议、API key、代理、`IMAGE_MAX_COUNT`、`REPLAY_REASONING_CONTENT`。
+- 记忆不生效：查 `TEXT_EMBEDDING_MODEL`、`TEXT_EMBEDDING_DIMENSION`、Qdrant、auto_memory 水位和记忆仲裁日志。
+- 语音/表情不生效：查对应开关、概率、embedding LLM、表情目录、CosyVoice key，以及当前适配器是否在允许列表内。
 
 ## License
 
