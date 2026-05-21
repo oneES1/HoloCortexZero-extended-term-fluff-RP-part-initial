@@ -11,7 +11,7 @@ HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是
 
 ## HoloCortexZero最终目的在以年为单位长程通用的，可自主发现创新，自主产出落地，自主社交规划的基于序列模型搭建的（当前LLM主流阶段）以agentic框架叙述，共4个阶段
 
-前2阶段：1.陪伴型RP框架，起步练手（已完成） 2.打造24小时短期任务的通用思考元认知agentic框架并显著在思考，推理，研究性benchmark超过现有方案
+前2阶段：1.陪伴型RP框架，起步练手（已完成） 2.打造24小时短期任务的通用思考元认知agentic框架并显著在思考，推理，研究性benchmark超过现有方案（休息几天后进行）
 
 # HoloCortexZero-Metacognition-part-Prose（还未实施的阶段2）
 并没有成熟敢宣称最好的方案，方案仍在探索斟酌和调研。目前正在考虑先创建够用的符号工具再后续开发
@@ -117,6 +117,18 @@ tool 链持久化时，assistant 纯文本回复会把隐藏思考写到 meta-on
 短期记忆就是当前 `DBContextWindow` 下的 `DBContextMessage` 历史。它不是简单复制某个群或私聊的全量聊天记录，而是由当前 context 的 active dialog 增量同步、去重、水位线、历史裁剪、压缩摘要共同维护。高级 context 默认 100 条历史后触发 timeline 压缩，保留最近 10 条；硬读取上限按 1.2 倍冗余计算，冗余触顶但仍未完成压缩会变成滑动窗口。普通 context 默认 48 条触发归档回收，保留最近 10 条，并把较早历史整理成归档块。
 
 长期记忆使用 Mem0/Qdrant，collection 固定为 `holo_cortex_zero_memory`。`services/memory/mem0_utils.py` 负责 memory client、embedding、memory 管理模型配置；`services/memory/runtime.py` 负责运行时写入、冲突仲裁、召回拼装；写入走后台队列，属于异步最终一致，不阻塞主回复链。
+
+### 记忆写入仲裁
+
+所有 `add_memory` 写入先进入 `_memory_write_queue`，由后台 worker 调 `_add_memory_impl()` 执行。入队前会把 memory 清洗为最长 2000 字的纯文本形态，并清洗 metadata；空 memory 或空 user_id 直接忽略。真正入库时关闭 mem0 自带 infer 拆解，HCZ 自己负责“原子化输入 + 仲裁 + 写入”，避免 mem0 推理分支把事实拆错或触发版本兼容问题。
+
+仲裁前先用新记忆在同一个 `user_id/agent_id/run_id` 下做 mem0 search，`limit=24`；代码层只把 `score >= 0.74` 的候选送入冲突判断。没有候选时直接 ADD。存在候选时，`analyze_memory_conflict()` 调用配置的 `MEMORY_MANAGE_MODEL`，使用 `MEMORY_ARBITER_SYSTEM_PROMPT` 构造“写入归属 + 对话环境 + metadata + 现有记忆 + 新记忆”的仲裁请求，要求只返回 JSON：`action`、`targets`、`new_content`、`reason`。
+
+仲裁动作只有三种：`ADD` 表示新事实独立入库；`UPDATE` 表示删除 `targets` 指向的旧记忆，再把 `new_content` 作为合并/修正后的新记忆写入；`REJECT` 表示重复、低价值、主体不清或不该保存的内容被拒绝。非法 action 会归一为 ADD；仲裁模型配置缺失、无返回、JSON 解析失败或调用异常，也全部 fail-soft 为 ADD，保证记忆写入链不断。
+
+图谱类记忆有代码级保护，不完全信任仲裁 LLM。metadata `type/TYPE` 属于 `relation_map`、`knowledge_index` 等图谱写入时，禁止 REJECT；若同 alias/keyword 命中旧记录，会优先收敛为 UPDATE，保证 Stage0 图谱缓存和冷启动恢复需要的映射能落库。每次 ADD/UPDATE 后，如果 `SUBCONSCIOUS_ENABLE=true`，都会对 `graph_cache.write_through_from_memory(metadata)` 做写穿更新；写穿失败只记日志，不影响主写入结果。
+
+仲裁过程会通过 `dump_memory_json("manage", "request/response", ...)` 留下请求、候选、metadata、owner_context、chat_context、模型协议、原始响应与 parsed_result，方便复盘“为什么 ADD/UPDATE/REJECT”。这部分是可调试证据，不参与主回复 payload。
 
 回忆分三层：
 
