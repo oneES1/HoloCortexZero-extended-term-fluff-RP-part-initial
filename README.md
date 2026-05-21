@@ -95,6 +95,18 @@ HCZ 的 payload 主线是“先组装协议无关 IR，再由 router 发射”�
 
 fallback 不是重组第二份业务 payload。`LLMRouter.call_with_fallback()` 在主模型组失败后创建新的 `GenerationRequest`，保留同一份 `messages`、`tools`、`temperature`、`max_tokens`、`cache_hints`，只替换 fallback 模型、base url、protocol、proxy、extra params。主模型和 fallback 模型看到的业务语义一致，避免“主链一套逻辑、降级链另一套逻辑”。
 
+### 思维链回填逻辑
+
+思维链回填不是默认泄露模型思考，而是模型组显式能力。`ModelConfigGroup.REPLAY_REASONING_CONTENT` 默认 `false`；只有开启后，`model_group_params.py` 才会向本轮 `GenerationRequest.extra_params` 注入 `replay_reasoning_content=true`。router 以这个字段作为唯一 gate：未开启时，即使供应商返回 `reasoning_content`、Responses `reasoning` item、Gemini `thoughtSignature` 或文本里的 `<think>...</think>`，也会在 `_filter_result_reasoning_content()` 阶段丢弃，不进入历史回放闭环。
+
+IR 主干只承认一个字段：`MessageTurn.reasoning_content` / `GenerationResult.reasoning_content`。不同协议的隐藏思考不会直接互塞 wire 字段，而是由 `services/llm/reasoning_text.py` 统一包成 HCZ envelope：`text` 保存可跨 chat/responses 兜底复用的隐藏思考，`responses_items` 保存 Responses 原生 `reasoning` output item，`gemini_thought_signatures` 保存 Gemini tool 续链需要的签名。旧纯文本、旧 Responses JSON、旧 Gemini JSON 都在解析层兼容读取。
+
+模型返回后，chat emitter 从 `message.reasoning_content` 读取，Responses emitter 从 `output[type=reasoning]` 读取，Gemini emitter 从 tool call part 的 `thoughtSignature` 读取；如果隐藏思考混在可见文本里，`extract_text_reasoning_content()` 会先把 `<think>` 形态剥离成 `reasoning_content`，再让干净的可见文本进入 tool 解析、用户回复和上下文保存。
+
+tool 链持久化时，assistant 纯文本回复会把隐藏思考写到 meta-only `tool_calls_json=[{"_hcz_meta":{"reasoning_content":...}}]`；assistant tool_calls 会把隐藏思考写到第一个 tool call 的 `_hcz_meta.reasoning_content`。恢复历史时 `context_window/manager.py` 只把这段 meta 还原为 `MessageTurn.reasoning_content`，不会把 meta-only 记录误解析成伪 tool_call。
+
+发送下一轮 tool 续链前，`LLMRouter._ensure_reasoning_replay_for_tool_calls()` 会检查 function-call 历史段：如果模型组开启回填，所有 assistant tool-call 历史都必须有非空 `reasoning_content`；缺失真实思维链时写入最小占位，已有真实思维链绝不覆盖。最终各 emitter 按协议回放：chat 写 assistant `reasoning_content`，Responses 优先回放原生 `reasoning` item、只有 text 时才用 `<think>...</think>` assistant history，Gemini 只回放 `thoughtSignature`，没有签名不伪造。
+
 降级主要发生在 router 的媒体策略阶段，而不是散落到各 emitter。图片会先按数量限制裁剪，再物化为协议可接受的数据；WEBP 会全局转 JPEG，特定兼容目标下 GIF 会转 PNG。音频/视频按协议能力处理：Gemini 可保留音频/视频；chat/responses 对不支持的媒体降级成文本说明；tool 产生的视频默认只保留最近 1 个候选，内联上限 8MB、60 秒，必要时用 `ffmpeg` 压缩或提取音频预览。
 
 ## 3.长短期记忆与回忆设计
