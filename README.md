@@ -6,8 +6,8 @@ Holo Cortex Zero (HCZ) is a metacognitive multi-model agent platform.
 > 于全息智脑深处，涌现始于原点
 
 This repository is the Docker-deployable source tree for HCZ. Full project
-documentation is still being prepared; the deployment guide is available in
-[README_DEPLOY.md](README_DEPLOY.md).
+documentation is still being prepared; deployment guides are available in
+[Chinese](README_DEPLOY.md) and [English](README_DEPLOY_EN.md).
 
 ## Quick Deploy
 

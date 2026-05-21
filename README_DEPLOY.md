@@ -1,5 +1,7 @@
 # HCZ Docker 部署教程
 
+English version: [README_DEPLOY_EN.md](README_DEPLOY_EN.md)
+
 这份文档用于从 HCZ Docker 发布包完成部署。发布包不包含运行数据、密钥、日志、上传文件、PostgreSQL 数据、Qdrant 数据、NapCat / QQ 登录态、自设图私有素材；这些内容会在部署机器上生成。
 
 ## 1. 最短流程

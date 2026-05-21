@@ -34,7 +34,9 @@ docs/*
 !NOTICE
 !README.md
 !README_DEPLOY.md
+!README_DEPLOY_EN.md
 !make_docker_release_bundle.sh
+!hcz-docker-deploy-*.tar.gz
 
 # Allow common Python/OS noise inside tracked roots to remain untracked
 **/.DS_Store

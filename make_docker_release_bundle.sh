@@ -39,6 +39,7 @@ require_path "${ROOT_DIR}/LICENSE"
 require_path "${ROOT_DIR}/NOTICE"
 require_path "${ROOT_DIR}/README.md"
 require_path "${ROOT_DIR}/README_DEPLOY.md"
+require_path "${ROOT_DIR}/README_DEPLOY_EN.md"
 require_path "${ROOT_DIR}/holo-cortex-zero-main"
 require_path "${ROOT_DIR}/holo-cortex-zero-main/default_workspace/emoji"
 require_path "${ROOT_DIR}/holo-cortex-zero-main/data/configs/holo-cortex-zero.yaml"
@@ -53,6 +54,7 @@ rsync -a "${ROOT_DIR}/LICENSE" "${WORK_DIR}/HCZ/"
 rsync -a "${ROOT_DIR}/NOTICE" "${WORK_DIR}/HCZ/"
 rsync -a "${ROOT_DIR}/README.md" "${WORK_DIR}/HCZ/"
 rsync -a "${ROOT_DIR}/README_DEPLOY.md" "${WORK_DIR}/HCZ/"
+rsync -a "${ROOT_DIR}/README_DEPLOY_EN.md" "${WORK_DIR}/HCZ/"
 rsync -a \
   --exclude '.git' \
   --exclude '.venv' \
@@ -214,7 +216,7 @@ if [[ "$(tar -tzf "${ARCHIVE_PATH}" | rg -c '^HCZ/holo-cortex-zero-main/default_
   exit 1
 fi
 
-for required_release_file in LICENSE NOTICE README.md README_DEPLOY.md; do
+for required_release_file in LICENSE NOTICE README.md README_DEPLOY.md README_DEPLOY_EN.md; do
   if [[ "$(tar -tzf "${ARCHIVE_PATH}" | rg -c "^HCZ/${required_release_file}$")" != "1" ]]; then
     log "压缩包缺少发布说明文件: ${required_release_file}"
     exit 1
