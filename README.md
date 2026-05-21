@@ -40,7 +40,7 @@ HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是
 
 - 1.用户，频道context管理综述
 
-- 2.payload组装，降级，处理路由设计
+- 2.payload组装，Prompt配置，降级，处理路由设计
 
 - 3.长短期记忆与回忆设计
 
@@ -85,7 +85,7 @@ context 管理由 `services/context_window/manager.py` 负责，核心概念是�
 
 高级管理命令走 `MessageService`，例如 `/clear` 清当前上下文，`/clearall` 清高级上下文相关记录，`/test` 触发测试，`/norm`、`/cute`、`/puss` 切换高级上下文模式。这些命令是管理入口，不是普通用户能力；普通用户的同名文本不会进入特权控制路径。
 
-## 2.payload组装，降级，处理路由设计
+## 2.payload组装，Prompt配置，降级，处理路由设计
 
 HCZ 的 payload 主线是“先组装协议无关 IR，再由 router 发射”。`services/context_window/assembler.py` 输出统一的 `GenerationRequest`，里面只有 `MessageTurn`、`MessagePart`、`ToolSpec`、`cache_hints` 等框架内部结构，不直接绑定 OpenAI chat、Responses 或 Gemini 的 wire shape。
 
@@ -97,6 +97,18 @@ HCZ 的 payload 主线是“先组装协议无关 IR，再由 router 发射”�
 - 历史消息：从 `DBContextMessage` 读出 user/assistant/tool 序列。
 - 回忆与动态指导：长期记忆召回、环境标注、当前时间。
 - 最新用户轮：如果历史最后一条是用户消息，会被挪到整个 payload 末尾，保证模型最后看到的仍是最新触发。
+
+### Prompt配置、默认身份与运行态覆盖逻辑
+
+Prompt 主干不是散落在各业务文件里的硬编码字符串，而是“默认模板 + 运行态配置覆盖 + 身份渲染”的组合。`core/prompt_defaults.py` 保存开源包自带默认模板；`core/config.py` 暴露 WebUI 提示词页和系统设置页可以保存的配置；主回复、潜意识、auto memory、记忆仲裁、timeline 等链路在组装请求前读取运行态配置，配置为空时才回到默认模板。
+
+默认模板里能看到 `541955254` 和 `海泡菜`，这是故意保留的开源 seed 身份，不是误把作者私有身份写死给所有部署者用。系统设置里的“你自己的统一 ID”和“你对智能体的统一昵称”会覆盖它们：`render_identity_prompt()` 会把默认 prompt 里的 seed ID、seed 昵称和默认 bot 昵称替换成当前运行态配置。这样默认 prompt 能保留完整角色语义，新部署者只要在系统设置里改统一 ID/统一昵称，就不会被作者默认身份污染。
+
+主人格 prompt 按上下文模式解析。普通用户走“普通用户人格”；高级用户 `/norm` 走“群聊里回复你的 norm 人格”；`/cute` 优先走“私聊回复你的 cute 人格”，为空就回退 norm，再回退普通人格；`/puss` 优先走 Pro/deep 人格，配置为空时也逐级回退。每次最终选出的 prompt 都会再经过 `render_identity_prompt()`，所以兜底 prompt 不会绕过身份替换。
+
+辅助 prompt 也走同一套覆盖和兜底逻辑。群聊自动回复 judge 读取 judge prompt，缺失时按 fail-open/fail-close 策略处理；Stage1 潜意识读取潜意识 prompt，空时回默认模板；auto memory 读取自动记忆 prompt，空时回默认模板；记忆仲裁读取仲裁 prompt，模板里的 `{owner_context}`、`{chat_context}`、`{metadata_json}` 是运行时填充占位符，不能删；timeline 读取长对话压缩 prompt，空时回默认模板。这些 prompt 都由提示词页集中配置，不要求用户改源码。
+
+旧版本兼容只在配置层做一次迁移：如果旧配置里还有旧版“AI 聊天预设”，而新的普通、高级、deep 主人格 prompt 为空，`CoreConfig._migrate_legacy_prompt_fields()` 才会把旧预设填进去；已有新配置不会被覆盖。也就是说，代码里保留默认 seed、运行态配置覆盖、旧字段迁移和 prompt 兜底都服务于同一条 prompt 主干，不制造第二套 prompt 路由。
 
 `services/llm/router.py` 是 LLM 协议路由唯一主干。它负责 model group 解析、协议识别、媒体策略、缓存 hint 整理、fallback 调用。协议发射器只做最后一公里转换：
 
@@ -306,12 +318,14 @@ LLM 页面就是“模型供应商配置”。新手先不要管所有高级项�
 - “你专用的高级 LLM”：发送 `/puss` 后使用的 Pro/deep 模型。
 - “回复其他人的 LLM”：普通用户触发时使用的模型。
 - “备用 LLM”：主模型失败时自动切过去的兜底模型。
-- “多模态 LLM”：处理音频、视频更强的**Gemini发射器协议**模型，Gemini 这类全模态模型。
+- “多模态 LLM”：处理音频、视频更强的**Gemini发射器协议**全模态模型。
 
 
 ### Prompt 也值得你单独配置，不然bot身份，昵称不明朗
 
 提示词页优先填“主人格”相关内容：智能体昵称、群聊回复你的 norm 人格、私聊回复你的 cute 人格、`/puss` 的 Pro 人格、普通用户人格。先把这些写成符合你角色设定的版本，再配辅助链 prompt。
+
+如果提示词里看到默认示例 ID 或昵称，不需要手动全局搜索替换；系统设置里的统一 ID 和统一昵称会在运行时做身份替换。
 
 不要把工作流、tool 使用规则、记忆仲裁规则全部塞进主人格 prompt；tool、记忆、judge、timeline 已经有各自 prompt，混在一起会污染 RP 主上下文，也会降低缓存稳定性。记忆仲裁 prompt 这类模板如果看到 `{owner_context}`、`{chat_context}`、`{metadata_json}` 这种占位符，不要删。
 
@@ -333,7 +347,7 @@ LLM 页面就是“模型供应商配置”。新手先不要管所有高级项�
 6. 到监控里的聊天频道列表确认该频道是开启状态。
 7. 私聊发送普通文本测试主回复；群聊先用 @ 或触发词测试，不要一开始依赖随机回复。
 8. 再测图片；如果失败，先调该 LLM 的“图片数量上限”，再检查模型是否支持图像协议。
-9. 最后再开自动记忆、语音、表情包和工具。
+9. 最后测试自动记忆、语音、表情包和工具。
 
 排错优先级：
 
