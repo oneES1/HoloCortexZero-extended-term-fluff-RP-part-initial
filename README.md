@@ -32,7 +32,7 @@ HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是
 8.联想与记忆的注入非常重要，但具体落实时具体务实分析
 
 ## Mac/Win 客户端程序下载地址见：（做好了会在这写）
-## Linux源码部署文档：[Chinese](README_DEPLOY.md) and [English](README_DEPLOY_EN.md).
+## Linux源码部署文档：[中文](README_DEPLOY.md) and [English](README_DEPLOY_EN.md).
 
 # 目录
 0.RP part宗旨：
@@ -124,13 +124,13 @@ tool 链持久化时，assistant 纯文本回复会把隐藏思考写到 meta-on
 
 短期记忆就是当前 `DBContextWindow` 下的 `DBContextMessage` 历史。它不是简单复制某个群或私聊的全量聊天记录，而是由当前 context 的 active dialog 增量同步、去重、水位线、历史裁剪、压缩摘要共同维护。高级 context 默认 100 条历史后触发 timeline 压缩，保留最近 10 条；硬读取上限按 1.2 倍冗余计算，冗余触顶但仍未完成压缩会变成滑动窗口。普通 context 默认 48 条触发归档回收，保留最近 10 条，并把较早历史整理成归档块。
 
-长期记忆使用 Mem0/Qdrant，collection 固定为 `holo_cortex_zero_memory`。`services/memory/mem0_utils.py` 负责 memory client、embedding、memory 管理模型配置；`services/memory/runtime.py` 负责运行时写入、冲突仲裁、召回拼装；写入走后台队列，属于异步最终一致，不阻塞主回复链。
+长期记忆使用 Mem0/Qdrant，collection 固定为 `holo_cortex_zero_memory`。`services/memory/mem0_utils.py` 负责 memory client、embedding、memory 管理模型配置；`services/memory/runtime.py` 负责运行时写入、冲突仲裁、召回拼装；写入走后台队列，属于并行异步最终一致，不阻塞主回复链。
 
 ### 记忆写入仲裁
 
 所有 `add_memory` 写入先进入 `_memory_write_queue`，由后台 worker 调 `_add_memory_impl()` 执行。入队前会把 memory 清洗为最长 2000 字的纯文本形态，并清洗 metadata；空 memory 或空 user_id 直接忽略。真正入库时关闭 mem0 自带 infer 拆解，HCZ 自己负责“原子化输入 + 仲裁 + 写入”，避免 mem0 推理分支把事实拆错或触发版本兼容问题。
 
-仲裁前先用新记忆在同一个 `user_id/agent_id/run_id` 下做 mem0 search，`limit=24`；代码层只把 `score >= 0.74` 的候选送入冲突判断。没有候选时直接 ADD。存在候选时，`analyze_memory_conflict()` 调用配置的 `MEMORY_MANAGE_MODEL`，使用 `MEMORY_ARBITER_SYSTEM_PROMPT` 构造“写入归属 + 对话环境 + metadata + 现有记忆 + 新记忆”的仲裁请求，要求只返回 JSON：`action`、`targets`、`new_content`、`reason`。
+仲裁前先用新记忆在同一个 `user_id/agent_id/run_id` 下做 mem0 search，`limit=24`；代码层只把 `score >= 0.74` 的候选送入冲突判断。没有候选时直接 ADD。存在候选时，`analyze_memory_conflict()` 调用配置的 `MEMORY_MANAGE_MODEL`，使用 `MEMORY_ARBITER_SYSTEM_PROMPT` 构造“**写入归属 + 对话环境** + metadata + 现有记忆 + 新记忆”的仲裁请求，要求只返回 JSON：`action`、`targets`、`new_content`、`reason`。
 
 仲裁动作只有三种：`ADD` 表示新事实独立入库；`UPDATE` 表示删除 `targets` 指向的旧记忆，再把 `new_content` 作为合并/修正后的新记忆写入；`REJECT` 表示重复、低价值、主体不清或不该保存的内容被拒绝。非法 action 会归一为 ADD；仲裁模型配置缺失、无返回、JSON 解析失败或调用异常，也全部 fail-soft 为 ADD，保证记忆写入链不断。
 
@@ -146,7 +146,19 @@ tool 链持久化时，assistant 纯文本回复会把隐藏思考写到 meta-on
 
 高级用户上下文会固定注入高级用户静态画像，保证长期 RP 的身份连续性；普通用户上下文优先按当前 `context_id/chat_key` 召回，如果主查询缺失或命中不足，会使用静态 fallback，避免空记忆导致回复突然失去背景。
 
-自动记忆由 `services/memory/auto_memory.py` 后台运行，统计 `human_chat` 与 `bot_reply` 两类可计数消息。默认 `AUTO_MEMORY_TRIGGER_MESSAGE_COUNT=10`，达到阈值后构造一个只暴露 `add_memory` tool 的辅助 LLM 请求。只有辅助 LLM 完成审核，或实际执行了 `add_memory`，才推进 `auto_memory_last_context_msg_id` 水位；如果没有成功写入，就保留 pending 状态，下一轮继续尝试。
+### 自动记忆 auto_memory
+
+自动记忆由 `services/memory/auto_memory.py` 后台运行，是“静默审阅上下文并决定是否写长期记忆”的辅助链，不直接参与主回复。启动时会自补 `DBContextWindow` 上的 `auto_memory_last_context_msg_id`、`auto_memory_pending_count`、`auto_memory_generating` 三列，并在恢复阶段重新计算 pending、清掉遗留 generating 锁，避免重启后卡死。
+
+触发统计只看同一 `context_id` 下的 `DBContextMessage`，不按 `chat_key/source_chat_key` 分桶；`chat_key` 只用于写入时标注来源环境。可计数类型固定为 `human_chat` 与 `bot_reply`，角色只接受 `user/assistant`。默认 `AUTO_MEMORY_TRIGGER_MESSAGE_COUNT=10`，达到阈值后 `_query_batch_upper_bound_id()` 取“自上次水位后的第 N 条可计数消息”作为本批上界，保证每批有明确可回滚水位。
+
+单次 auto_memory 默认只给辅助 LLM 看最近 `AUTO_MEMORY_RECENT_MESSAGE_COUNT=10` 条上下文消息，可复用主链最近一次 recall 快照；没有 recall 快照时也允许运行，只是不带回忆提示。请求使用独立 `AUTO_MEMORY_MODEL_GROUP`，`context_id="aux:auto_memory"`，`temperature=0.1`，`stream=false`，只暴露一个 `add_memory` tool；`parallel_tool_calls=false`，`AUTO_MEMORY_TOOL_CHOICE` 默认 `auto`，不默认强制 `required`。
+
+辅助 LLM 的合法行为只有两种：调用 `add_memory` 写入少量高价值记忆，或保持沉默表示本批已审阅但无可写内容。单轮最多执行 `AUTO_MEMORY_MAX_TOOL_CALLS=8` 个 tool call；非 `add_memory` tool 会被忽略。每个有效 tool call 会解析 `memory/user_id/metadata`，用当前批次来源 `dialog_chat_key` 构造 `AgentCtx`，再进入正常 `add_memory -> 记忆仲裁 -> mem0 写入` 主干。
+
+水位推进很严格：如果模型没有产出 tool_call，表示“审阅完成但无可写记忆”，会推进到本批上界；如果执行了至少 1 个 `add_memory`，也推进到本批上界；如果返回了 tool_calls 但没有成功执行任何 `add_memory`，不推进水位，保留 pending 让后续重试。每次完成后重新计算 pending；如果剩余 pending 仍达到阈值，会自动链式触发下一批。
+
+auto_memory 会通过 `dump_memory_json("auto_memory", "request/response/tool_call", ...)` 保存请求 wire payload、上下文源消息、recall_text、模型返回、执行过的 tool calls 和 resolved env。`AUTO_MEMORY_DEBUG_LOG_PAYLOAD=true` 时还会打印截断预览，默认日志上限 `AUTO_MEMORY_PAYLOAD_LOG_MAX_CHARS=12000`。这些证据只用于调试，不进入主聊天 payload。
 
 ## 4.缓存设计，音频视频逻辑
 
