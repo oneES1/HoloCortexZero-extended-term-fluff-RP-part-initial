@@ -53,6 +53,13 @@ HoloCortexZero最终目的在以年为单位长程通用的，可自主发现创
 
 ## 1.用户，频道context管理综述
 
+context 管理由 `services/context_window/manager.py` 负责，核心概念是把“对话窗口”和“上下文窗口”解耦：
+
+- 对话窗口 Dialog Window 是物理收发位置，例如 QQ 群、QQ 私聊、TG 私聊。
+- 上下文窗口 Context Window 是 AI 实际看到的逻辑上下文，持久化在 `DBContextWindow`。
+- 高级用户：`context_id = user_id`，所以高级用户跨群聊、私聊、平台时共享同一个长期上下文。
+- 普通用户：`context_id = chat_key`，普通用户的上下文窗口等同当前物理对话窗口。
+
 入口消息先由各平台 adapter 收到，再统一进入 `adapters/interface/collector.py`。collector 的第一步不是写库，而是调用 `adapters/interface/identity.py` 做身份归一化：平台侧的原始 user/channel 信息只在适配器边界处理一次，进入框架后统一使用 HCZ 规范化后的 `platform_userid`、`channel_id` 和 `chat_key`。这样后续命令、context 路由、权限、附件策略都只面对框架身份，不再为 QQ、Telegram、Matrix 等来源各写一套主干。
 
 用户与频道是两层持久化对象：
@@ -60,13 +67,6 @@ HoloCortexZero最终目的在以年为单位长程通用的，可自主发现创
 - `DBUser` 记录“谁发的”：`adapter_key + platform_userid` 组成用户唯一来源，另外保存权限、封禁、禁止触发等用户状态。
 - `DBChatChannel` 记录“从哪里发的”：`adapter_key + channel_id` 组成物理频道，框架内唯一键是 `chat_key = f"{adapter_key}-{channel_id}"`。
 - 新频道默认激活规则在 `DBChatChannel._default_active_for_new_channel`：高级用户私聊恒激活，普通群聊/私聊按配置 `SESSION_GROUP_ACTIVE_DEFAULT`、`SESSION_PRIVATE_ACTIVE_DEFAULT` 决定。
-
-context 管理由 `services/context_window/manager.py` 负责，核心概念是把“对话窗口”和“上下文窗口”解耦：
-
-- 对话窗口 Dialog Window 是物理收发位置，例如 QQ 群、QQ 私聊、TG 私聊。
-- 上下文窗口 Context Window 是 AI 实际看到的逻辑上下文，持久化在 `DBContextWindow`。
-- 高级用户：`context_id = user_id`，所以高级用户跨群聊、私聊、平台时共享同一个长期上下文。
-- 普通用户：`context_id = chat_key`，普通用户的上下文窗口等同当前物理对话窗口。
 
 `DBContextWindow.active_dialog_id` 是当前回复锚点。高级用户在不同窗口触发时，context 不变，但 `active_dialog_id` 会切到最近一次触发的窗口，bot 最终回复也发回这个窗口。`update_anchor()` 明确规定：tool 链运行中 `tool_chain_active=True` 时不允许切换锚点，避免一个长工具任务执行到一半被另一个群聊/私聊抢走回复目标。
 
@@ -99,14 +99,14 @@ fallback 不是重组第二份业务 payload。`LLMRouter.call_with_fallback()` 
 
 ## 3.长短期记忆与回忆设计
 
-短期记忆就是当前 `DBContextWindow` 下的 `DBContextMessage` 历史。它不是简单复制某个群或私聊的全量聊天记录，而是由当前 context 的 active dialog 增量同步、去重、水位线、历史裁剪、压缩摘要共同维护。高级 context 默认 100 条历史后触发 timeline 压缩，保留最近 10 条；硬读取上限按 1.2 倍冗余计算。普通 context 默认 48 条触发归档回收，保留最近 10 条，并把较早历史整理成归档块。
+短期记忆就是当前 `DBContextWindow` 下的 `DBContextMessage` 历史。它不是简单复制某个群或私聊的全量聊天记录，而是由当前 context 的 active dialog 增量同步、去重、水位线、历史裁剪、压缩摘要共同维护。高级 context 默认 100 条历史后触发 timeline 压缩，保留最近 10 条；硬读取上限按 1.2 倍冗余计算，冗余触顶但仍未完成压缩会变成滑动窗口。普通 context 默认 48 条触发归档回收，保留最近 10 条，并把较早历史整理成归档块。
 
 长期记忆使用 Mem0/Qdrant，collection 固定为 `holo_cortex_zero_memory`。`services/memory/mem0_utils.py` 负责 memory client、embedding、memory 管理模型配置；`services/memory/runtime.py` 负责运行时写入、冲突仲裁、召回拼装；写入走后台队列，属于异步最终一致，不阻塞主回复链。
 
 回忆分三层：
 
 - Stage0 图谱缓存：`graph_cache.py` 从 mem0 中提取关系/概念类记忆，放入内存 LRU；默认 `SUBCONSCIOUS_CACHE_SIZE=15`，写图谱记忆时同步更新缓存。
-- Stage1 潜意识路由：`subconscious.py` 读取最近消息、图谱快照和上下文 meta，让辅助 LLM 判断本轮要查哪些意图、是否更新图谱缓存、是否切换 topic mode。
+- Stage1 潜意识路由：`subconscious.py` 读取最近消息、图谱快照和上下文 meta，让辅助 LLM 判断本轮要查哪些意图、是否更新图谱缓存。
 - Stage2 多路召回：Stage1 成功后，并发执行静态画像、context 主查询、intent 查询、第三方关系回退等 mem0 search，再合成最终 memory prompt。
 
 高级用户上下文会固定注入高级用户静态画像，保证长期 RP 的身份连续性；普通用户上下文优先按当前 `context_id/chat_key` 召回，如果主查询缺失或命中不足，会使用静态 fallback，避免空记忆导致回复突然失去背景。
@@ -137,7 +137,7 @@ router 会把结构化请求切成 canonical units，计算稳定前缀 LCP，�
 
 tool 主循环在 `services/tools/chain_executor.py`。它不是一次 LLM 调用后直接结束，而是一个闭环：
 
-- 标记 `DBContextWindow.tool_chain_active=True`，清理当前 context 的 pending human trigger。
+- 标记 `DBContextWindow.tool_chain_active=True`，清理当前 context 的 pending human trigger，也就是
 - 每轮先同步 active dialog 的新聊天消息，再尝试应用已完成的摘要。
 - 重新解析 model group，组装 `GenerationRequest`，调用 `LLMRouter.call_with_fallback()`。
 - 如果 LLM 返回纯文本，写入 assistant 历史并发送最终回复。
