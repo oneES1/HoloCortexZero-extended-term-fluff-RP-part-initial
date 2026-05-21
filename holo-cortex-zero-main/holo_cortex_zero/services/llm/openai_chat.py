@@ -616,8 +616,6 @@ class OpenAIChatEmitter(BaseEmitter):
         source: str,
         max_long_edge: Optional[int] = None,
     ) -> tuple[str, bytes]:
-        if not max_long_edge or max_long_edge <= 0:
-            return mime_type, data
         mime = str(mime_type or "image/png").strip().lower() or "image/png"
         if not mime.startswith("image/") or not data:
             return mime_type, data
@@ -625,12 +623,15 @@ class OpenAIChatEmitter(BaseEmitter):
             with Image.open(io.BytesIO(data)) as image:
                 image = ImageOps.exif_transpose(image)
                 width, height = image.size
-                if max(width, height) <= max_long_edge:
+                should_resize = bool(max_long_edge and max_long_edge > 0 and max(width, height) > max_long_edge)
+                should_transcode_webp = mime == "image/webp"
+                if not should_resize and not should_transcode_webp:
                     if mime == "image/jpg":
                         return "image/jpeg", data
                     return mime_type, data
                 resized = image.copy()
-                resized.thumbnail((max_long_edge, max_long_edge), Image.Resampling.LANCZOS)
+                if should_resize:
+                    resized.thumbnail((max_long_edge, max_long_edge), Image.Resampling.LANCZOS)
                 new_width, new_height = resized.size
                 has_alpha = "A" in resized.getbands() or "transparency" in resized.info
                 output = io.BytesIO()
@@ -643,15 +644,21 @@ class OpenAIChatEmitter(BaseEmitter):
                         resized = resized.convert("RGB")
                     resized.save(output, format="JPEG", quality=90, optimize=True)
                 normalized = output.getvalue()
+                reasons = []
+                if should_resize:
+                    reasons.append("oversized")
+                if should_transcode_webp:
+                    reasons.append("webp_compat")
                 logger.info(
-                    "[openai_chat][image] normalized oversized image for local chat target: "
+                    "[openai_chat][image] normalized image for chat target: "
+                    f"reason={'+'.join(reasons)} "
                     f"source={source} size={width}x{height} -> {new_width}x{new_height} "
                     f"mime={mime} -> {output_mime} bytes={len(data)} -> {len(normalized)}"
                 )
                 return output_mime, normalized
         except Exception as exc:
             logger.warning(
-                "[openai_chat][image] normalize oversized image failed, keep original: "
+                "[openai_chat][image] normalize image failed, keep original: "
                 f"source={source} mime={mime} err={exc}"
             )
             return mime_type, data
