@@ -108,7 +108,7 @@ Prompt 主干不是散落在各业务文件里的硬编码字符串，而是“�
 
 辅助 prompt 也走同一套覆盖和兜底逻辑。群聊自动回复 judge 读取 judge prompt，缺失时按 fail-open/fail-close 策略处理；Stage1 潜意识读取潜意识 prompt，空时回默认模板；auto memory 读取自动记忆 prompt，空时回默认模板；记忆仲裁读取仲裁 prompt，模板里的 `{owner_context}`、`{chat_context}`、`{metadata_json}` 是运行时填充占位符，不能删；timeline 读取长对话压缩 prompt，空时回默认模板。这些 prompt 都由提示词页集中配置，不要求用户改源码。
 
-旧版本兼容只在配置层做一次迁移：如果旧配置里还有旧版“AI 聊天预设”，而新的普通、高级、deep 主人格 prompt 为空，`CoreConfig._migrate_legacy_prompt_fields()` 才会把旧预设填进去；已有新配置不会被覆盖。也就是说，代码里保留默认 seed、运行态配置覆盖、旧字段迁移和 prompt 兜底都服务于同一条 prompt 主干，不制造第二套 prompt 路由。
+源码里还保留了一次历史配置字段迁移，位置在 `core/config.py` 的 `CoreConfig._migrate_legacy_prompt_fields()`。它只处理历史字段 `AI_CHAT_PRESET_NAME` 和 `AI_CHAT_PRESET_SETTING`：如果新的人格昵称、普通人格、高级人格、deep 人格 prompt 为空，才把历史字段填进去；已有新配置不会被覆盖。也就是说，代码里保留默认 seed、运行态配置覆盖、历史字段迁移和 prompt 兜底都服务于同一条 prompt 主干，不制造第二套 prompt 路由。
 
 `services/llm/router.py` 是 LLM 协议路由唯一主干。它负责 model group 解析、协议识别、媒体策略、缓存 hint 整理、fallback 调用。协议发射器只做最后一公里转换：
 
@@ -253,22 +253,31 @@ tool 兜底遵循结构化失败：缺工具、越权、参数错误、runtime �
 
 ## 8.效果展示
 
-- 记忆效果演示：“男娘”与巧克力的玩笑，喜欢讲地狱笑话的用户画像长期持久记忆
+### 记忆效果演示
 
-memory1,2图片
+“男娘”与巧克力的玩笑，喜欢讲地狱笑话的用户画像长期持久记忆。
 
-- 群聊自主回复演示，附带语音演示
+![记忆效果演示 1](img/memory1.png)
 
-auto_reply
+![记忆效果演示 2](img/memory2.png)
 
-- 工具可用性
+### 群聊自主回复与语音
 
-tool1,2
+群聊自主回复演示，附带语音发送效果。
 
-- LLM踪迹追踪
+![群聊自主回复演示](img/auto_reply.png)
 
-trace
+![语音演示](img/voice.png)
 
+### 工具可用性
+
+![工具调用演示 1](img/tool1.png)
+
+![工具调用演示 2](img/tool2.png)
+
+### LLM 踪迹追踪
+
+![LLM 踪迹追踪](img/trace.png)
 
 ## 9.开始操作指南
 
