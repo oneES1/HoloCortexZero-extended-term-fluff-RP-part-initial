@@ -1,0 +1,106 @@
+{
+  "title": "User Management",
+  "search": {
+    "placeholder": "Search user nickname or ID",
+    "noResults": "No matching users found"
+  },
+  "actions": {
+    "search": "Search",
+    "edit": "Edit User",
+    "delete": "Delete User",
+    "viewDetails": "View Details",
+    "ban": "Ban User",
+    "unban": "Unban User",
+    "restoreTrigger": "Restore Trigger Permission",
+    "confirm": "Confirm",
+    "cancel": "Cancel"
+  },
+  "list": {
+    "empty": "No users available",
+    "total": "{{count}} users total",
+    "noData": "No data"
+  },
+  "table": {
+    "userId": "User ID",
+    "username": "Username",
+    "nickname": "Nickname",
+    "status": "Status",
+    "lastActive": "Last Active",
+    "createdAt": "Created At",
+    "adapterPlatform": "Platform",
+    "platformUserId": "Platform User ID",
+    "permission": "Permission",
+    "actions": "Actions"
+  },
+  "status": {
+    "active": "Active",
+    "inactive": "Inactive",
+    "banned": "Banned",
+    "normal": "Normal",
+    "passive": "Passive"
+  },
+  "duration": {
+    "permanent": "Permanent",
+    "days": "Days",
+    "hours": "Hours",
+    "minutes": "Mins",
+    "banTitle": "Set ban duration:",
+    "preventTriggerTitle": "Set prevent trigger duration:"
+  },
+  "tooltips": {
+    "view": "View Details",
+    "edit": "Edit User",
+    "ban": "Ban User",
+    "unban": "Unban User",
+    "preventTrigger": "Prevent Trigger",
+    "restoreTrigger": "Restore Trigger",
+    "delete": "Delete User"
+  },
+  "sort": {
+    "asc": "Ascending",
+    "desc": "Descending"
+  },
+  "dialogs": {
+    "deleteTitle": "Delete User",
+    "deleteConfirm": "Are you sure you want to delete user \"{{username}}\"? This action cannot be undone.",
+    "unbanTitle": "Unban User",
+    "unbanConfirm": "Are you sure you want to unban user \"{{username}}\"?",
+    "restoreTriggerTitle": "Restore Trigger Permission",
+    "restoreTriggerConfirm": "Are you sure you want to restore trigger permission for user \"{{username}}\"?",
+    "editUserTitle": "Edit User"
+  },
+  "messages": {
+    "updateSuccess": "User updated successfully",
+    "deleteSuccess": "User deleted successfully",
+    "banSuccess": "User banned successfully",
+    "unbanSuccess": "User unbanned successfully",
+    "restoreTriggerSuccess": "Trigger permission restored"
+  },
+  "form": {
+    "username": "Username",
+    "permLevel": "Permission Level",
+    "accessKey": "Access Key",
+    "accessKeyHelper": "Please enter super access key to confirm changes"
+  },
+  "validation": {
+    "usernameRequired": "Username is required",
+    "accessKeyRequired": "Access Key is required"
+  },
+  "detail": {
+    "title": "User Details",
+    "basicInfo": "Basic Info",
+    "statusInfo": "Status Info",
+    "otherInfo": "Other Info",
+    "extData": "Extended Data",
+    "updateTime": "Update Time",
+    "uniqueId": "Unique ID",
+    "accountStatus": "Account Status",
+    "banUntil": "Ban Until",
+    "triggerPermission": "Trigger Permission",
+    "preventTriggerUntil": "Prevent Trigger Until",
+    "loadingError": "Loading failed: {{error}}",
+    "notFound": "User data not found",
+    "allowTrigger": "Allow Trigger",
+    "preventTrigger": "Prevent Trigger"
+  }
+}

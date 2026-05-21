@@ -1,0 +1,219 @@
+[project]
+name = "holo-cortex-zero"
+version = "2.1.0"
+description = "更智能、更优雅的代理执行 AI"
+authors = [{name = "KroMiose", email = "li_xiangff@163.com"}]
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = {text = "Custom License"}
+keywords = ["nonebot", "ai", "agent"]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "pip>=24.0",
+    "nonebot2[fastapi]>=2.2.1,<3.0.0",
+    "nonebot-adapter-onebot>=2.4.2,<3.0.0",
+    "python-jose[cryptography]>=3.3.0,<4.0.0",
+    "httpx[socks]>=0.27.0,<0.28.0",
+    "tiktoken>=0.7.0,<1.0.0",
+    "aiodocker>=0.22.2,<1.0.0",
+    "openai>=1.107.0,<1.108.0",
+    "openpyxl>=3.1.2,<4.0.0",
+    "pillow>=10.4.0,<11.0.0",
+    "psycopg2-binary>=2.9.9,<3.0.0",
+    "python-multipart>=0.0.9,<1.0.0",
+    "toml>=0.10.2,<1.0.0",
+    "tortoise-orm==0.24",
+    "asyncpg>=0.30.0,<1.0.0",
+    "json5>=0.10.0,<1.0.0",
+    "sse-starlette>=2.2.1,<3.0.0",
+    "lunar-python>=1.3.12,<2.0.0",
+    "tzlocal>=5.2,<6.0",
+    "aiofiles>=24.1.0,<25.0.0",
+    "python-magic>=0.4.27,<1.0.0",
+    "python-magic-bin>=0.4.14,<1.0.0; sys_platform == 'win32'",
+    "mem0ai>=0.1.79,<1.0.0",
+    "qdrant-client>=1.18.0,<1.19.0",
+    "mcp>=1.7.0,<2.0.0",
+    "pycryptodome>=3.23.0,<4.0.0",
+    "matplotlib>=3.10.3,<4.0.0",
+    "pandas>=2.3.0,<3.0.0",
+    "websockets>=15.0.1,<16.0.0",
+    "aiohttp>=3.11.15,<4.0.0",
+    "matrix-nio[e2e]>=0.25.2,<0.26.0",
+    "python-telegram-bot>=22.4,<23.0",
+    "tavily-python>=0.7.12,<1.0.0",
+    "dashscope>=1.25.12,<2.0.0",
+    "pysocks>=1.7.1,<2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "uvicorn>=0.23.2,<1.0.0",
+    "nb-cli>=1.4.0,<2.0.0",
+    "ruff>=0.14.10,<1.0.0",
+    "poethepoet>=0.24.0,<1.0.0",
+]
+
+[project.scripts]
+bot = "run_bot:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["holo_cortex_zero", "tool_runtime"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"run_bot.py" = "run_bot.py"
+
+[tool.black]
+line-length = 128
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+
+[tool.ruff]
+extend-exclude = []
+ignore = [
+    "E402",
+    "E501",
+    "E722",
+    "B008",
+    "B905",
+    "F401",
+    "TID252",
+    "TRY002",
+    "TRY003",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    "RUF006",
+    "RUF012",
+    "RUF059",
+    "RUF100",
+    "PGH003",
+    "N801",
+    "A003",
+]
+select = [
+    "F",
+    "E",
+    "I",
+    "B",
+    "A",
+    "COM",
+    "C4",
+    "ISC",
+    "PIE",
+    "PYI",
+    "Q",
+    "RSE",
+    "RET",
+    "SLF",
+    "SIM",
+    "TID",
+    "ARG",
+    "PTH",
+    "PGH",
+    "TRY",
+    "RUF",
+]
+
+# ============================================================================
+# Poe 任务配置
+# ============================================================================
+[tool.poe.tasks]
+
+# 开发运行
+[tool.poe.tasks.dev]
+help = "启动完整开发栈（依赖容器 + 后端热重载 + 前端 Vite）"
+cmd = "bash scripts/dev_stack.sh"
+
+[tool.poe.tasks.dev-docs]
+help = "启动完整开发栈（依赖容器 + 后端热重载文档 + 前端 Vite）"
+cmd = "bash scripts/dev_stack.sh --docs"
+
+[tool.poe.tasks.dev-backend]
+help = "仅启动后端开发服务器（带热重载，使用 .env.dev）"
+cmd = "bot --env=dev --reload"
+
+[tool.poe.tasks.dev-backend-docs]
+help = "仅启动后端开发服务器（带热重载和 OpenAPI 文档，使用 .env.dev）"
+cmd = "bot --env=dev --reload --docs"
+
+[tool.poe.tasks.dev-frontend]
+help = "仅启动前端 Vite 开发服务器"
+cmd = "pnpm --dir frontend dev --host 0.0.0.0"
+
+[tool.poe.tasks.dev-deps-up]
+help = "启动开发依赖容器"
+cmd = "docker compose -f docker/docker-compose.dev.yml up -d"
+
+[tool.poe.tasks.dev-deps-down]
+help = "停止开发依赖容器"
+cmd = "docker compose -f docker/docker-compose.dev.yml down"
+
+[tool.poe.tasks.dev-deps-ps]
+help = "查看开发依赖容器状态"
+cmd = "docker compose -f docker/docker-compose.dev.yml ps"
+
+# 生产运行
+[tool.poe.tasks.start]
+help = "启动生产服务器（使用 .env.prod）"
+cmd = "bot --env=prod"
+
+# 测试相关
+[tool.poe.tasks.test]
+help = "运行主模块加载测试"
+cmd = "bot --load-test"
+
+# 代码质量
+[tool.poe.tasks.lint]
+help = "运行代码检查"
+cmd = "ruff check ."
+
+[tool.poe.tasks.lint-fix]
+help = "运行代码检查并自动修复"
+cmd = "ruff check --fix ."
+
+[tool.poe.tasks.format]
+help = "格式化代码"
+cmd = "ruff format ."
+
+[tool.poe.tasks.format-check]
+help = "检查代码格式"
+cmd = "ruff format --check ."
+
+# 依赖管理
+[tool.poe.tasks.sync]
+help = "同步项目依赖"
+cmd = "uv sync"
+
+[tool.poe.tasks.sync-dev]
+help = "同步项目依赖（包括开发依赖）"
+cmd = "uv sync --all-extras"
+
+[tool.poe.tasks.lock]
+help = "更新依赖锁定文件"
+cmd = "uv lock"
+
+[tool.poe.tasks.update]
+help = "更新所有依赖到最新兼容版本"
+cmd = "uv lock --upgrade"
+
+# 清理
+[tool.poe.tasks.clean]
+help = "清理缓存和临时文件"
+shell = """
+rm -rf .venv
+rm -rf .ruff_cache
+rm -rf __pycache__
+rm -rf .pytest_cache
+find . -type d -name "__pycache__" -exec rm -rf {} +
+find . -type f -name "*.pyc" -delete
+"""

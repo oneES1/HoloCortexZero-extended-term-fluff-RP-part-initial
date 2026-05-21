@@ -1,0 +1,71 @@
+{
+  "title": "Dashboard",
+  "cards": {
+    "totalMessages": "Total Messages",
+    "toolChainRuns": "Tool Calls"
+  },
+  "charts": {
+    "realTimeData": "Runtime Overview",
+    "activeRanking": "Active Ranking",
+    "noData": "No data available",
+    "noRealtimeData": "No real-time data, waiting for collection"
+  },
+  "tooltip": {
+    "count": "Count",
+    "ratio": "Ratio"
+  },
+  "granularity": {
+    "label": "Time Scale",
+    "1hour": "1 hour",
+    "1day": "1 day",
+    "1week": "1 week",
+    "1month": "1 month",
+    "4months": "4 months"
+  },
+  "stats": {
+    "messages": "Messages",
+    "runs": "Runs",
+    "sessions": "Sessions",
+    "successRate": "Success Rate"
+  },
+  "latestMessage": {
+    "label": "Latest Message",
+    "empty": "No messages yet"
+  },
+  "metrics": {
+    "toolChainRuns": "Tool Calls",
+    "successCalls": "Successful Runs",
+    "failedCalls": "Failed Runs",
+    "successRate": "Tool Chain Success Rate"
+  },
+  "ranking": {
+    "title": "Active Ranking",
+    "messageCount": "Messages",
+    "messages": "messages"
+  },
+  "errors": {
+    "parseRealTimeData": "Failed to parse real-time data",
+    "streamError": "Dashboard data stream error"
+  },
+  "panels": {
+    "noTrace": "No chain trace yet",
+    "lastChainError": "Chain Error",
+    "latestErrorLog": "Log History",
+    "noErrorLog": "No log history",
+    "chainMonitor": "Chain Monitor",
+    "contextLength": "Context",
+    "totalDuration": "Total",
+    "copied": "Copied error message",
+    "copyFailed": "Copy failed",
+    "close": "Close",
+    "logHistory": "Log History",
+    "noLogHistory": "No log history",
+    "noChainEvents": "No chain events"
+  },
+  "time": {
+    "justNow": "Just now",
+    "minutesAgo": "{{count}} minutes ago",
+    "hoursAgo": "{{count}} hours ago",
+    "daysAgo": "{{count}} days ago"
+  }
+}

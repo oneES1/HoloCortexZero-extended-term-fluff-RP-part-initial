@@ -1,0 +1,30 @@
+{
+  "title": "聊天管理",
+  "search": {
+    "placeholder": "搜索聊天...",
+    "noResults": "未找到匹配的频道"
+  },
+  "filters": {
+    "type": "类型",
+    "status": "状态",
+    "all": "全部",
+    "group": "群聊",
+    "private": "私聊",
+    "active": "已激活",
+    "inactive": "未激活"
+  },
+  "list": {
+    "empty": "暂无聊天频道",
+    "total": "共 {{count}} 个频道",
+    "loaded": "已加载 {{loaded}} / {{total}}",
+    "loadingMore": "正在加载更多...",
+    "scrollForMore": "继续下滑加载更多",
+    "activate": "启用",
+    "deactivate": "停用"
+  },
+  "messageHistory": {
+    "noMessages": "暂无消息记录",
+    "noContent": "[无文本内容]",
+    "scrollToBottom": "回到底部"
+  }
+}

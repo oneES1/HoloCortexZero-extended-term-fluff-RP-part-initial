@@ -1,0 +1,95 @@
+# OneBot V11 适配器
+
+## 概述
+
+OneBot V11 适配器用于与兼容 OneBot V11 标准的 QQ 机器人实现进行通信，支持群聊和私聊消息的收发。
+
+## 支持的实现
+
+- **NapCat**: 基于官方 QQ 的 OneBot 实现 (**推荐**: 可一体化部署)
+- **Lagrange.OneBot**: 基于 Lagrange.Core 的 OneBot 实现 (需要手动挂载映射容器目录)
+
+## 功能特性
+
+### 消息类型支持
+
+- ✅ 纯文本消息
+- ✅ @用户消息
+- ✅ 图片消息（支持本地文件和网络链接）
+- ✅ 文件上传（群文件/私聊文件）
+
+### 聊天类型支持
+
+- ✅ 群聊消息收发
+- ✅ 私聊消息收发
+- ✅ 群成员信息获取
+- ✅ 群信息获取
+
+### 高级功能
+
+- ✅ 消息反应（emoji 点赞）
+- ✅ 文本中@用户自动解析
+
+## 配置说明
+
+### 必需配置
+
+适配器会自动连接到 NoneBot2 配置的 OneBot V11 协议端，无需额外配置连接信息。
+
+### 高级身份配置
+
+OneBot 只声明 QQ 平台侧高级用户，框架内高级 ID 由核心配置 `ADVANCED_USER_ID` 决定：
+
+```yaml
+OWNER_QQ_USER_ID: '123456789'
+```
+
+入站命中 `OWNER_QQ_USER_ID` 后，HCZ 主干会统一映射为 `ADVANCED_USER_ID`；高级私聊出站 `onebot_v11-private_<ADVANCED_USER_ID>` 会由适配器回映射到 `OWNER_QQ_USER_ID` 发送。
+
+### 会话接入配置
+
+```yaml
+AUTO_ACCEPT_PRIVATE_REQUEST: true
+AUTO_ACCEPT_GROUP_REQUEST: false
+```
+
+好友请求默认自动接受；群聊邀请和加群请求默认不自动接受。是否回复由 HCZ 聊天频道 `is_active` 和触发逻辑决定。
+
+## 聊天标识规则
+
+OneBot V11 适配器使用以下格式标识聊天频道：
+
+- **群聊**: `onebot_v11-group_123456` （123456 为群号）
+- **私聊**: `onebot_v11-private_123456` （123456 为用户 QQ 号）
+
+## 依赖要求
+
+- NoneBot2 框架
+- nonebot-adapter-onebot 适配器包
+- 兼容的 OneBot V11 实现（如 go-cqhttp、NapCat 等）
+
+## 常见问题
+
+### Q: 无法发送消息？
+
+A: 请检查：
+
+1. OneBot 实现是否正常运行
+2. NoneBot2 是否成功连接到 OneBot 实现
+3. 机器人是否在目标群聊中
+
+### Q: 图片无法发送？
+
+A: 请确保：
+
+1. 图片文件存在且可读
+2. 图片格式被 OneBot 实现支持
+3. 图片大小符合平台限制
+
+### Q: 文件上传失败？
+
+A: 请检查：
+
+1. 协议端文件目录挂载是否正确
+2. OneBot 实现是否支持文件上传
+3. 文件路径映射是否正确

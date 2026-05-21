@@ -1,0 +1,126 @@
+# syntax=docker/dockerfile:1
+ARG NPM_REGISTRY
+ARG UV_DEFAULT_INDEX
+
+FROM --platform=$BUILDPLATFORM node:20-slim@sha256:1e85773c98c31d4fe5b545e4cb17379e617b348832fb3738b22a08f68dec30f3 AS frontend-builder
+ARG NPM_REGISTRY
+
+# 可选 npm/pnpm 镜像源。仅构建阶段使用，不写入运行态业务配置。
+RUN if [ -n "${NPM_REGISTRY}" ]; then npm config set registry "${NPM_REGISTRY}"; fi
+
+# 设置工作目录
+WORKDIR /app/frontend
+
+# 安装 pnpm
+RUN npm install -g pnpm && \
+    if [ -n "${NPM_REGISTRY}" ]; then pnpm config set registry "${NPM_REGISTRY}"; fi
+
+# 首先复制依赖文件，利用缓存
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+# 然后复制源代码并构建
+COPY frontend/tsconfig*.json ./
+COPY frontend/vite.config.ts ./
+COPY frontend/postcss.config.js ./
+COPY frontend/tailwind.config.js ./
+COPY frontend/tsconfig.app.json ./
+COPY frontend/tsconfig.json ./
+COPY frontend/tsconfig.node.json ./
+COPY frontend/index.html ./
+COPY frontend/src ./src
+COPY frontend/public ./public
+RUN pnpm build
+
+# 使用更小的基础镜像来存储构建产物
+FROM busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662 AS frontend-dist
+COPY --from=frontend-builder /app/frontend/dist /frontend-dist
+
+FROM python:3.11-slim-bullseye@sha256:9e25f400253a5fa3191813d6a67eb801ca1e6f012b3bd2588fa6920b59e3eba6
+ARG UV_DEFAULT_INDEX
+ARG APT_DEBIAN_MIRROR
+ARG APT_SECURITY_MIRROR
+ARG APT_NO_PROXY
+
+# 设置环境变量
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 可选 apt 镜像源。仅构建阶段使用，不写入运行态业务配置。
+RUN if [ -n "${APT_DEBIAN_MIRROR}" ] || [ -n "${APT_SECURITY_MIRROR}" ]; then \
+        debian_mirror="${APT_DEBIAN_MIRROR:-http://deb.debian.org/debian}"; \
+        security_mirror="${APT_SECURITY_MIRROR:-http://deb.debian.org/debian-security}"; \
+        find /etc/apt -name '*.list' -print0 | xargs -0 sed -i \
+          -e "s#http://deb.debian.org/debian-security#${security_mirror}#g" \
+          -e "s#https://deb.debian.org/debian-security#${security_mirror}#g" \
+          -e "s#http://security.debian.org/debian-security#${security_mirror}#g" \
+          -e "s#https://security.debian.org/debian-security#${security_mirror}#g" \
+          -e "s#http://deb.debian.org/debian#${debian_mirror}#g" \
+          -e "s#https://deb.debian.org/debian#${debian_mirror}#g"; \
+        printf 'APT sources configured: debian=%s security=%s\n' "${debian_mirror}" "${security_mirror}"; \
+    fi; \
+    if [ "${APT_NO_PROXY:-}" = "true" ]; then \
+        printf 'Acquire::http::Proxy "false";\nAcquire::https::Proxy "false";\n' > /etc/apt/apt.conf.d/99hcz-no-proxy; \
+        printf 'APT proxy disabled by APT_NO_PROXY=true\n'; \
+    fi
+
+# 设置时区
+RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo 'Asia/Shanghai' > /etc/timezone
+
+# 分批安装依赖以避免 QEMU 段错误
+RUN apt update && apt install -y ca-certificates curl
+RUN apt install -y gnupg
+RUN apt update && apt install -y libmagic-dev libolm-dev ffmpeg
+
+# 清理缓存
+RUN apt clean && rm -rf /var/lib/apt/lists/*
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置环境变量
+ENV STATIC_DIR=/app/static
+
+# 安装 UV（使用官方推荐方式）
+COPY --from=ghcr.io/astral-sh/uv:latest@sha256:c4f5de312ee66d46810635ffc5df34a1973ba753e7241ce3a08ef979ddd7bea5 /uv /uvx /usr/local/bin/
+
+# 首先复制依赖文件和 README（pyproject.toml 需要），利用缓存
+COPY pyproject.toml uv.lock README.md ./
+
+# 复制入口脚本（force-include 需要）
+COPY run_bot.py ./
+
+# 先只同步第三方依赖，避免普通源码变更打穿 Python 依赖缓存层。
+# 项目包源码在下一步复制后再安装。
+RUN if [ -n "${UV_DEFAULT_INDEX}" ]; then \
+        uv sync --frozen --no-dev --no-install-project --default-index "${UV_DEFAULT_INDEX}"; \
+    else \
+        uv sync --frozen --no-dev --no-install-project; \
+    fi
+
+# 复制应用代码
+COPY holo_cortex_zero ./holo_cortex_zero
+COPY tool_runtime ./tool_runtime
+COPY scripts/hcz_runtime_entrypoint.sh /usr/local/bin/hcz_runtime_entrypoint.sh
+COPY .env.prod ./
+
+# 可选 uv Python 包索引。仅构建阶段使用，不写入运行态业务配置。
+RUN if [ -n "${UV_DEFAULT_INDEX}" ]; then \
+        uv sync --frozen --no-dev --default-index "${UV_DEFAULT_INDEX}"; \
+    else \
+        uv sync --frozen --no-dev; \
+    fi
+
+# 从前端构建产物复制静态文件
+COPY --from=frontend-dist /frontend-dist ${STATIC_DIR}
+
+RUN chmod +x /usr/local/bin/hcz_runtime_entrypoint.sh
+
+# 暴露端口
+EXPOSE 20261
+
+# 健康检查
+HEALTHCHECK --interval=10s --timeout=3s CMD curl -f "http://127.0.0.1:${PORT:-20261}/api/health" || exit 1
+
+# 启动应用
+CMD ["bash", "-lc", "/usr/local/bin/hcz_runtime_entrypoint.sh"]

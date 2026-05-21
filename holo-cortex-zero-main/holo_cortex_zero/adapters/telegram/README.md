@@ -1,0 +1,72 @@
+# Telegram 适配器
+
+Telegram 适配器，允许机器人与 Telegram 平台进行交互。
+
+## 功能特点
+
+- 支持接收和发送文本消息
+- 支持处理图片、文件、语音、视频等多媒体内容
+- 支持 @ 用户功能
+- 支持贴纸(Sticker)和视频笔记(Video Note)
+- 支持私聊和群聊
+- 基于 python-telegram-bot 库，稳定可靠
+
+## 技术实现
+
+适配器基于 `python-telegram-bot 21.11.1` 版本开发，使用异步轮询方式接收消息。
+
+## 配置说明
+
+适配器需要在配置文件中设置以下参数：
+
+- **BOT_TOKEN**: 从 [@BotFather](https://t.me/BotFather) 获取的 Telegram Bot Token（必填）
+- **PROXY_URL**: 代理地址（可选），支持 HTTP/HTTPS/SOCKS5，格式如 `http://host:port` 或 `socks5://host:port`；默认不继承系统 `DEFAULT_PROXY`
+  - HTTP/HTTPS 代理无需额外依赖
+  - SOCKS5 代理需要安装额外依赖：`poetry add python-telegram-bot[socks]`
+
+## 注意事项
+
+1. 机器人需要有足够的权限来读取和发送消息
+2. 在群聊中，需要明确 @机器人 或在私聊中发送消息才会进入触发判断；是否回复由 HCZ 聊天频道 `is_active` 和触发逻辑决定
+3. 大文件可能需要较长时间传输，请耐心等待
+
+## 常见问题
+
+### Q: 如何获取 Telegram Bot Token？
+A: 与 [@BotFather](https://t.me/BotFather) 对话，使用 `/newbot` 命令创建机器人并获取 Token。
+
+### Q: 启动后看起来没有连接成功？
+A: 请检查：
+- `BOT_TOKEN` 是否已正确填写
+- 机器人是否已通过 @BotFather 正确创建
+- 网络连接是否正常（新版本基于 python-telegram-bot，网络要求较低）
+
+### Q: 如何在群聊中使用机器人？
+A: 在群聊中，需要：
+- 将机器人添加到群组
+- 给机器人管理员权限或确保能读取消息
+- 发送消息时需要 @机器人用户名来触发回复
+
+### Q: 如何获取用户或群组的 ID？
+A: 可以使用一些第三方机器人（如 @userinfobot）来获取 ID，或通过适配器的日志查看。
+
+### Q: 为什么机器人不响应我的消息？
+A: 请检查：
+- Bot Token 是否正确
+- 在群聊中是否 @了机器人（群聊需要明确提及）
+- Telegram Bot 无需接受私聊邀请，`AUTO_ACCEPT_PRIVATE_CHAT` 仅表示是否接收私聊 update；是否回复由 HCZ 主干决定
+- Telegram 没有自动加入/接受群聊邀请的 Bot API 开关，bot 被拉入群后才会收到群消息；新群是否回复仍由 HCZ 频道 `is_active` 决定
+- 机器人是否有权限读取消息（在 @BotFather 中设置权限）
+- 检查适配器日志是否有错误信息
+
+## 技术架构
+
+### 核心组件
+- **TelegramAdapter**: 主适配器类，管理连接和消息流
+- **MessageProcessor**: 消息处理器，负责转换消息格式
+- **TelegramConfig**: 配置管理类
+
+### 代理支持
+- 支持 HTTP/HTTPS 代理：`http://host:port`（无需额外依赖）
+- 支持 SOCKS5 代理：`socks5://host:port`（需要运行 `poetry add python-telegram-bot[socks]` 安装依赖）
+- 支持带认证的代理：`http://user:pass@host:port`

@@ -1,0 +1,45 @@
+SCOPE_MODE: disabled
+PROJECT_ROOT: /workspace
+DEFAULT_TIMEOUT: 60
+ALLOWED_COMMAND_PREFIXES:
+- 'git '
+- 'ls '
+- 'cat '
+- 'head '
+- 'tail '
+- 'grep '
+- 'rg '
+- 'find '
+- 'wc '
+- 'diff '
+- 'file '
+- 'pytest '
+- 'python '
+- 'pip '
+- 'pip3 '
+- 'npm '
+- 'npx '
+- 'node '
+- 'yarn '
+- 'pnpm '
+- 'docker '
+- 'docker-compose '
+- 'curl '
+- 'wget '
+- 'du '
+- 'df '
+- 'env '
+- 'echo '
+- 'make '
+- 'cargo '
+- 'go '
+- systemctl status
+BLOCKED_PATTERNS:
+- rm\s+-rf\s+/
+- dd\s+if=
+- mkfs
+- shutdown
+- reboot
+- '>\s*/dev/sd'
+- curl\s+.*\|\s*(?:ba)?sh
+- wget\s+.*\|\s*(?:ba)?sh

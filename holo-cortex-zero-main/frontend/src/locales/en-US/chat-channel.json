@@ -1,0 +1,30 @@
+{
+  "title": "Chat Management",
+  "search": {
+    "placeholder": "Search chats...",
+    "noResults": "No matching channels found"
+  },
+  "filters": {
+    "type": "Type",
+    "status": "Status",
+    "all": "All",
+    "group": "Group",
+    "private": "Private",
+    "active": "Active",
+    "inactive": "Inactive"
+  },
+  "list": {
+    "empty": "No chat channels available",
+    "total": "{{count}} channels total",
+    "loaded": "Loaded {{loaded}} / {{total}}",
+    "loadingMore": "Loading more...",
+    "scrollForMore": "Scroll for more",
+    "activate": "Enable",
+    "deactivate": "Disable"
+  },
+  "messageHistory": {
+    "noMessages": "No message history",
+    "noContent": "[No text content]",
+    "scrollToBottom": "Scroll to bottom"
+  }
+}

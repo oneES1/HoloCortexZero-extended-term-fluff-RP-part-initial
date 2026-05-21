@@ -1,0 +1,57 @@
+{
+  "loading": "加载适配器信息中...",
+  "loadFailed": "加载失败",
+  "loadAdapterFailed": "加载适配器信息失败",
+  "tab": {
+    "adapterNotExist": "适配器不存在",
+    "pageNotExist": "页面不存在"
+  },
+  "tabs": {
+    "config": "适配器配置",
+    "overrides": "覆盖配置",
+    "logs": "容器日志",
+    "napcat": "NapCat"
+  },
+  "names": {
+    "onebot_v11": "OneBot",
+    "telegram": "Telegram",
+    "matrix": "Matrix"
+  },
+  "override": {
+    "missingKey": "缺少适配器 KEY",
+    "info": "此处的配置将覆盖指定适配器的系统默认配置。如果启用了某个配置项的覆盖，该适配器下的所有聊天都将默认使用此处设置的值，除非聊天自身再次覆盖了该配置。",
+    "emptyMessage": "该适配器暂无可配置项"
+  },
+  "napcat": {
+    "cannotGetAddress": "无法获取 NapCat 访问地址",
+    "serviceNotRunning": "NapCat 服务未运行"
+  },
+  "logs": {
+    "connectFailed": "连接日志流失败",
+    "cleared": "日志已清空",
+    "tokenCopied": "Token 已复制到剪贴板",
+    "copyFailed": "复制失败，请手动复制",
+    "status": "状态",
+    "startTime": "启动时间",
+    "unknown": "未知",
+    "disconnected": "日志流连接已断开，正在尝试重新连接...",
+    "tokenNotFound": "未找到 WebUI Token，请检查 NapCat 初始化状态",
+    "copy": "复制",
+    "autoScroll": "自动滚动",
+    "containerStatus": "容器状态",
+    "logCount": "日志条数",
+    "clear": "清空日志",
+    "webuiToken": "WebUI Token",
+    "copyToken": "复制 Token"
+  },
+  "config": {
+    "notSupportedTitle": "该适配器不支持配置",
+    "notSupportedMessage": "该适配器没有可配置的参数，无需进行配置。",
+    "emptyMessage": "暂无 {{name}} 配置项",
+    "title": "配置项",
+    "description": "管理 {{name}} 的运行时参数。修改后会自动保存。",
+    "stats": "统计",
+    "totalItems": "配置项总数",
+    "searchPlaceholder": "搜索配置项..."
+  }
+}
