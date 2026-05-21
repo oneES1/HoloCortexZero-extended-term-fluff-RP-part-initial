@@ -35,7 +35,10 @@ require_cmd python3
 
 require_path "${ROOT_DIR}/docker-compose.yml"
 require_path "${ROOT_DIR}/.env.share.example"
-require_path "${ROOT_DIR}/holo-cortex-zero-main/docs/README_DEPLOY.md"
+require_path "${ROOT_DIR}/LICENSE"
+require_path "${ROOT_DIR}/NOTICE"
+require_path "${ROOT_DIR}/README.md"
+require_path "${ROOT_DIR}/README_DEPLOY.md"
 require_path "${ROOT_DIR}/holo-cortex-zero-main"
 require_path "${ROOT_DIR}/holo-cortex-zero-main/default_workspace/emoji"
 require_path "${ROOT_DIR}/holo-cortex-zero-main/data/configs/holo-cortex-zero.yaml"
@@ -46,7 +49,10 @@ mkdir -p "${WORK_DIR}/HCZ"
 log '复制部署必需内容'
 rsync -a "${ROOT_DIR}/docker-compose.yml" "${WORK_DIR}/HCZ/"
 rsync -a "${ROOT_DIR}/.env.share.example" "${WORK_DIR}/HCZ/"
-rsync -a "${ROOT_DIR}/holo-cortex-zero-main/docs/README_DEPLOY.md" "${WORK_DIR}/HCZ/README_DEPLOY.md"
+rsync -a "${ROOT_DIR}/LICENSE" "${WORK_DIR}/HCZ/"
+rsync -a "${ROOT_DIR}/NOTICE" "${WORK_DIR}/HCZ/"
+rsync -a "${ROOT_DIR}/README.md" "${WORK_DIR}/HCZ/"
+rsync -a "${ROOT_DIR}/README_DEPLOY.md" "${WORK_DIR}/HCZ/"
 rsync -a \
   --exclude '.git' \
   --exclude '.venv' \
@@ -207,6 +213,13 @@ if [[ "$(tar -tzf "${ARCHIVE_PATH}" | rg -c '^HCZ/holo-cortex-zero-main/default_
   log '压缩包缺少开源默认配置种子'
   exit 1
 fi
+
+for required_release_file in LICENSE NOTICE README.md README_DEPLOY.md; do
+  if [[ "$(tar -tzf "${ARCHIVE_PATH}" | rg -c "^HCZ/${required_release_file}$")" != "1" ]]; then
+    log "压缩包缺少发布说明文件: ${required_release_file}"
+    exit 1
+  fi
+done
 
 if [[ "$(tar -tzf "${ARCHIVE_PATH}" | rg -c '^HCZ/holo-cortex-zero-main/default_workspace/emoji/[^/]+$')" != "98" ]]; then
   log '压缩包中的默认 emoji 种子资源数量不是 98'

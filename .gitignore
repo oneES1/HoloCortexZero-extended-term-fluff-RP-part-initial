@@ -30,6 +30,9 @@ docs/*
 
 !docker-compose.yml
 !.env.share.example
+!LICENSE
+!NOTICE
+!README.md
 !README_DEPLOY.md
 !make_docker_release_bundle.sh
 
