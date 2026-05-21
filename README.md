@@ -6,7 +6,7 @@ HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是
 
 2.上下文在**多人类用户跨群聊/平台**时仍原生保证连贯；无需担心多群聊私聊并发冲突。无需担心bot不记得刚刚在另一个消息平台的私聊内容
 
-3.支持思维链回填，支持多种缓存协议；缓存率80%～95%，允许随时切换 gemini协议 全模态（图片语音视频），deepseek-v4 toolcall，responses，chat等发射器协议
+3.支持思维链回填，支持多种缓存协议；缓存率80%～95%，允许随时切换各个协议： gemini协议 全模态（图片语音视频），deepseek-v4 toolcall（必须开启回填），responses，chat等发射器协议
 
 4.为长期RP优化记忆：图谱索引+LLM检索+embedding，代码与仲裁LLM结合保证**复杂多用户鲁棒性**
 
