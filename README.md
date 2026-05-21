@@ -294,7 +294,9 @@ LLM 页面管理 `MODEL_GROUPS`。每个 LLM 至少要确认这些字段：
 
 ### 9.3 系统设置
 
-系统设置里先配置身份，再配置模型路由：
+系统设置里必须配置你的身份，你的ID；你的昵称
+
+再配置模型路由：
 
 - `ADVANCED_USER_ID`：高级 context 主用户 ID；高级用户的 context_id 固定为它。
 - `ADVANCED_USER_DISPLAY_NAME`：高级用户在 prompt、附件提示和身份纠偏中的显示名。
