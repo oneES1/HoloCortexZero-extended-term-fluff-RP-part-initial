@@ -23,5 +23,3 @@
 - `holo_cortex_zero/adapters/onebot_v11/README.md`
 - `holo_cortex_zero/adapters/telegram/README.md`
 - `holo_cortex_zero/adapters/matrix/README.md`
-
-按日期拆分的一次性修复记录、已失效的重构计划、品牌切换清理单已统一删除；后续若要追某次细节，请直接查看 Git 历史，而不是继续堆叠散落日志。
