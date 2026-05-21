@@ -54,7 +54,7 @@ HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是
 
 8.效果展示
 
-9.开始操作指南（登录，适配器，LLM，设置，验证）
+9.开始操作指南（登录，适配器，LLM，Prompt，设置，验证）
 
 # 架构展开
 
@@ -307,6 +307,21 @@ LLM 页面管理 `MODEL_GROUPS`。每个 LLM 至少要确认这些字段：
 - `FALLBACK_MODEL_GROUP`：主 LLM 不可用时的备用 LLM。
 - `MULTIMODAL_MODEL_GROUP`：多模态优先 LLM，常用于 Gemini 等图片/音频/视频能力更完整的模型。
 
+Prompt 也必须单独配置。WebUI 的“提示词”页读取系统配置里的隐藏 textarea 字段，入口包含这些 key：
+
+- `BOT_PERSONA_DISPLAY_NAME`：智能体昵称，影响协议展示、聊天记录落库和界面展示。
+- `MAIN_SYSTEM_PROMPT_ADVANCED`：高级用户 `/norm` 与群聊回复你的主人格 prompt。
+- `MAIN_SYSTEM_PROMPT_ADVANCED_DEEK`：高级用户 `/cute` 与私聊回复你的主人格 prompt；为空时回退 `MAIN_SYSTEM_PROMPT_ADVANCED`。
+- `MAIN_SYSTEM_PROMPT_ADVANCED_DEEP`：高级用户 `/puss` / Pro 模式主人格 prompt。
+- `MAIN_SYSTEM_PROMPT_NORMAL`：普通用户 context 使用的主人格 prompt。
+- `AI_REPLY_JUDGE_SYSTEM_PROMPT`：群聊是否接话的 judge prompt；为空时普通群聊 judge 默认 fail-close。
+- `SUBCONSCIOUS_SYSTEM_PROMPT`：Stage1 潜意识路由 prompt，影响本轮查什么记忆。
+- `AUTO_MEMORY_SYSTEM_PROMPT`：后台自动记忆 prompt，影响它是否调用 `add_memory`。
+- `MEMORY_ARBITER_SYSTEM_PROMPT`：记忆整理与冲突仲裁 prompt，模板必须保留 `{owner_context}`、`{chat_context}`、`{metadata_json}` 占位符。
+- `TIMELINE_SYSTEM_PROMPT`：上下文压缩摘要 prompt，影响摘要写法和后续历史恢复。
+
+最小可用配置是先把 `BOT_PERSONA_DISPLAY_NAME`、`MAIN_SYSTEM_PROMPT_ADVANCED`、`MAIN_SYSTEM_PROMPT_ADVANCED_DEEK`、`MAIN_SYSTEM_PROMPT_ADVANCED_DEEP`、`MAIN_SYSTEM_PROMPT_NORMAL` 写成符合你角色设定的版本，再配辅助链 prompt。不要把工作流、tool 使用规则、记忆仲裁规则全部塞进主人格 prompt；tool、记忆、judge、timeline 已经有各自 prompt，混在一起会污染 RP 主上下文，也会降低缓存稳定性。
+
 记忆相关最少要配：
 
 - `TEXT_EMBEDDING_MODEL`：记忆向量嵌入 LLM。
@@ -342,18 +357,21 @@ LLM 页面管理 `MODEL_GROUPS`。每个 LLM 至少要确认这些字段：
 1. LLM 页面保存一个 `chat` LLM，点连通性测试，确认返回正常。
 2. LLM 页面保存一个 `embedding` LLM，并在系统设置里填 `TEXT_EMBEDDING_MODEL`。
 3. 系统设置里填 `ADVANCED_USER_ID`、`ADVANCED_USER_DISPLAY_NAME`、`USE_MODEL_GROUP`、`NORMAL_USER_MODEL_GROUP`、`FALLBACK_MODEL_GROUP`。
-4. 配好一个消息平台适配器，让你的真实平台账号先私聊 bot 一句，确认用户和频道被创建。
-5. 到监控里的聊天频道列表确认 `is_active=true`。
-6. 私聊发送普通文本测试主回复；群聊先用 @ 或触发词测试，不要一开始依赖随机回复。
-7. 再测图片；如果失败，先调该 LLM 的 `IMAGE_MAX_COUNT`，再检查模型是否支持图像协议。
-8. 最后再开自动记忆、语音、表情包和工具。
+4. 提示词页先填主人格 prompt：高级 norm/cute/deep、普通用户 prompt，以及智能体昵称。
+5. 配好一个消息平台适配器，让你的真实平台账号先私聊 bot 一句，确认用户和频道被创建。
+6. 到监控里的聊天频道列表确认 `is_active=true`。
+7. 私聊发送普通文本测试主回复；群聊先用 @ 或触发词测试，不要一开始依赖随机回复。
+8. 再测图片；如果失败，先调该 LLM 的 `IMAGE_MAX_COUNT`，再检查模型是否支持图像协议。
+9. 最后再开自动记忆、语音、表情包和工具。
 
 排错优先级：
 
 - 没有入库：查适配器凭证、Bot 是否在线、平台是否真的把消息送到适配器。
 - 入库但不回复：查聊天频道 `is_active`、用户是否被封禁/禁止触发、群聊触发条件、tool 链是否正在运行。
 - 回复报模型错误：查 LLM 连通性、协议、API key、代理、`IMAGE_MAX_COUNT`、`REPLAY_REASONING_CONTENT`。
+- 人设不对或模式错乱：查 `BOT_PERSONA_DISPLAY_NAME`、`MAIN_SYSTEM_PROMPT_ADVANCED*`、`MAIN_SYSTEM_PROMPT_NORMAL`，再查 `/norm`、`/cute`、`/puss` 当前模式和 LLM 路由。
 - 记忆不生效：查 `TEXT_EMBEDDING_MODEL`、`TEXT_EMBEDDING_DIMENSION`、Qdrant、auto_memory 水位和记忆仲裁日志。
+- 记忆写入奇怪：查 `AUTO_MEMORY_SYSTEM_PROMPT` 和 `MEMORY_ARBITER_SYSTEM_PROMPT`，确认仲裁模板占位符没有被删。
 - 语音/表情不生效：查对应开关、概率、embedding LLM、表情目录、CosyVoice key，以及当前适配器是否在允许列表内。
 
 ## License
