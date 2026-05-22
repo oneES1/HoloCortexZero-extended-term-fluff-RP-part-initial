@@ -2,14 +2,14 @@
 
 组装顺序（由上到下）：
 1. SYSTEM: 主人格 prompt + 印象图 + 参考图路径 + ¥格式声明 + tool 提示
-2. USER: 压缩上下文（高级 context 的 timeline 摘要 / 普通 context 的较早历史归档）
-3. 历史消息序列: user/assistant/tool
-4. USER: 回忆与动态指导（memory RAG + 环境标注 + 时间）
+2. USER: 当前环境标注
+3. USER: 压缩上下文（高级 context 的 timeline 摘要 / 普通 context 的较早历史归档）
+4. 历史消息序列: user/assistant/tool/memory_inject
 """
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, List
+from typing import Any, List, Optional
 
 from holo_cortex_zero.core.config import config
 from holo_cortex_zero.core.logger import logger
@@ -36,7 +36,6 @@ class ContextAssembler:
         platform_name: str = "",
         impression_image_url: Optional[str] = None,
         reference_image_paths_text: str = "",
-        memory_recall: str = "",
         cache_domain: str = "",
     ) -> GenerationRequest:
         """组装完整的 GenerationRequest"""
@@ -74,7 +73,7 @@ class ContextAssembler:
             bool(reference_image_paths_text),
             len(tools),
         )
-        
+
         messages.append(MessageTurn(role="system", parts=system_parts))
 
         # === USER: 系统形象参考图（不是用户输入）===
@@ -95,6 +94,13 @@ class ContextAssembler:
                     MessagePart(type="image", url=impression_image_url),
                 ],
             ))
+
+        # === USER: 环境标注（稳定前置，不再挂在尾端）===
+        env_hint = self._get_environment_hint(context_window)
+        messages.append(MessageTurn(
+            role="user",
+            parts=[MessagePart(type="text", text=env_hint)],
+        ))
 
         # === USER: 压缩上下文（高级 context 的 timeline 摘要 / 普通 context 的较早历史归档）===
         if context_window.owner_type == "normal" and context_window.compressed_summary:
@@ -124,21 +130,6 @@ class ContextAssembler:
         history = await context_window_manager.get_history(context_window.context_id)
 
         messages.extend(history)
-
-        # === USER: 回忆与动态指导 ===
-        guidance_parts: List[MessagePart] = []
-
-        if memory_recall:
-            guidance_parts.append(MessagePart(type="text", text=memory_recall))
-
-        # 环境标注 + 时间
-        env_hint = self._get_environment_hint(context_window)
-        guidance_parts.append(MessagePart(
-            type="text",
-            text=env_hint,
-        ))
-
-        messages.append(MessageTurn(role="user", parts=guidance_parts))
 
         cache_hints = {
             "cache_control": "ephemeral",

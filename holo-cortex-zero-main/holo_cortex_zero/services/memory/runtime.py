@@ -1,5 +1,6 @@
 import time
 import json
+import hashlib
 import re
 from typing import Any, Dict, List, Optional
 import asyncio
@@ -198,6 +199,45 @@ def _log_add_memory_final(status: str, *, _ctx: AgentCtx, user_id: str, metadata
     )
 
 
+def _normalize_memory_prompt_line(text: Any) -> str:
+    line = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    line = re.sub(r"\s+", " ", line)
+    return line.strip()
+
+
+def _extract_memory_prompt_items(memory_context: str) -> List[Dict[str, str]]:
+    prompt_items: List[Dict[str, str]] = []
+    current_group = ""
+
+    for raw_line in str(memory_context or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = _normalize_memory_prompt_line(raw_line)
+        if not line:
+            continue
+
+        is_header = (
+            line.startswith("【")
+            or line.startswith("Static ")
+            or line.startswith("意图[")
+            or line.startswith("用户:")
+        )
+        if is_header:
+            current_group = line
+            continue
+
+        text = line[2:].strip() if line.startswith("- ") else line
+        if not text:
+            continue
+
+        digest_source = f"{current_group}\n{text}" if current_group else text
+        prompt_items.append({
+            "group": current_group,
+            "text": text,
+            "digest": hashlib.sha1(digest_source.encode("utf-8")).hexdigest(),
+        })
+
+    return prompt_items
+
+
 def _dump_add_memory_log(
     *,
     kind: str,
@@ -237,7 +277,6 @@ def _dump_add_memory_log(
             "channel_type": str(getattr(_ctx, "channel_type", "") or ""),
             "channel_id": str(getattr(_ctx, "channel_id", "") or ""),
             "dialog_env": {
-                "chat_env_system": str(getattr(env, "chat_env_system", "") or ""),
                 "chat_env_note": str(getattr(env, "chat_env_note", "") or ""),
                 "source_chat_key": str(getattr(env, "source_chat_key", "") or ""),
             },
@@ -652,10 +691,9 @@ async def inject_memory_prompt(_ctx: AgentCtx) -> str:
     env = build_memory_dialog_env_from_ctx(_ctx, context_chat_key=_context_chat_key or _ctx_chat_key)
     _channel_type = env.channel_type
     _channel_id = env.channel_id
-    chat_env_system = env.chat_env_system
     chat_env_note = env.chat_env_note
 
-    memory_context = "【当前暂无检索结果，是一片虚无的量子真空...】"
+    memory_context = ""
     
     # 定义核心记忆类型(静态画像)
     STATIC_TAGS = ["FACTS", "PREFERENCES", "TRAITS"]
@@ -899,12 +937,13 @@ async def inject_memory_prompt(_ctx: AgentCtx) -> str:
 
     # 记忆模块不可用时，直接注入“空记忆”提示，避免抛错导致主流程崩溃
     if not mem0:
-        memory_context = "【记忆系统当前不可用：mem0 客户端未初始化或配置不完整】"
-        PROMPT = f"""
-    ### 🔮 当前记忆投影
-    {memory_context}
-    """
-        return PROMPT
+        try:
+            meta = dict(getattr(_ctx, "_na_memory_recall_meta", {}) or {})
+            meta["prompt_items"] = []
+            _ctx._na_memory_recall_meta = meta
+        except Exception:
+            pass
+        return ""
 
     # 用于跨多路检索统一去重的 ID 集合
     collected_ids_global = set()
@@ -1567,7 +1606,7 @@ async def inject_memory_prompt(_ctx: AgentCtx) -> str:
 
         memory_context = " ".join([b for b in blocks if b.strip()])
         if not memory_context.strip():
-            memory_context = "【当前暂无检索结果，是一片虚无的量子真空...】"
+            memory_context = ""
 
         try:
             elapsed = time.perf_counter() - _stage2_t0
@@ -1771,19 +1810,21 @@ async def inject_memory_prompt(_ctx: AgentCtx) -> str:
                     logger.error(f"❌ 搜索用户 {uid} 记忆时发生坍缩: {e}")
 
             if not memory_context.strip():
-                memory_context = "【当前暂无检索结果，是一片虚无的量子真空...】"
-    
-    PROMPT = f"""
-    {chat_env_system}
-    我不能直球念出来我的记忆，这会给人监视的感觉，别人会很尴尬。我要避免给人监视的感觉，所以我会把记忆融入到我的思考和表达中，而不是直接念出来。**我不对外输出记忆的具体内容**，但它们会潜移默化地影响我的行为和决策。请我会尽力让这些记忆成为我行动的智慧源泉，而不是负担
-    {memory_context}
-    """
-    return PROMPT  # noqa: RET504
+                memory_context = ""
+
+    prompt_items = _extract_memory_prompt_items(memory_context)
+    try:
+        meta = dict(getattr(_ctx, "_na_memory_recall_meta", {}) or {})
+        meta["prompt_items"] = prompt_items
+        _ctx._na_memory_recall_meta = meta
+    except Exception:
+        pass
+
+    return str(memory_context or "").strip()
 
 
 async def cleanup_memory_runtime() -> None:
     """清理记忆运行时"""
-    global _mem0_instance, _last_config_hash, _memory_inject_cache
+    global _mem0_instance, _last_config_hash
     _mem0_instance = None
     _last_config_hash = None
-    _memory_inject_cache = {}

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from holo_cortex_zero.api.schemas import AgentCtx
 from holo_cortex_zero.core import config
-from holo_cortex_zero.core.runtime_identity import get_primary_advanced_user_id, is_advanced_user_id
+from holo_cortex_zero.core.runtime_identity import is_advanced_user_id
 
 
 @dataclass(frozen=True)
@@ -15,7 +14,6 @@ class MemoryDialogEnv:
     channel_id: str
     peer_id: str
     hp_private_flag: str
-    chat_env_system: str
     chat_env_note: str
 
 
@@ -46,19 +44,14 @@ def build_memory_dialog_env_from_chat_key(chat_key: str) -> MemoryDialogEnv:
         if peer_id and peer_id.isdigit():
             hp_private_flag = "是" if is_advanced_user_id(peer_id, config) else "否"
         if hp_private_flag == "是":
-            chat_env_system = "**内部System标注：高级用户私聊**"
-            chat_env_note = f"高级用户私聊({get_primary_advanced_user_id(config)})"
+            chat_env_note = "高级用户私聊"
         elif hp_private_flag == "否":
-            chat_env_system = "**内部System标注：陌生人私聊**"
             chat_env_note = "陌生人私聊"
         else:
-            chat_env_system = "**内部System标注：私聊**"
             chat_env_note = "私聊"
     elif channel_type == "group":
-        chat_env_system = "**内部System标注**"
         chat_env_note = "群聊"
     else:
-        chat_env_system = "**内部System标注：未知环境**"
         chat_env_note = "未知环境"
 
     return MemoryDialogEnv(
@@ -67,7 +60,6 @@ def build_memory_dialog_env_from_chat_key(chat_key: str) -> MemoryDialogEnv:
         channel_id=channel_id,
         peer_id=peer_id,
         hp_private_flag=hp_private_flag,
-        chat_env_system=chat_env_system,
         chat_env_note=chat_env_note,
     )
 
@@ -97,7 +89,6 @@ def build_memory_dialog_env_from_ctx(_ctx: AgentCtx, *, context_chat_key: str = 
             channel_id=channel_id or env.channel_id,
             peer_id=env.peer_id,
             hp_private_flag=env.hp_private_flag,
-            chat_env_system=env.chat_env_system,
             chat_env_note=env.chat_env_note,
         )
         # recompute using explicit ctx values for stronger correctness

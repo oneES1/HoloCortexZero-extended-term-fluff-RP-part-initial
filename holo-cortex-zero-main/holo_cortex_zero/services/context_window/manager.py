@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import hashlib
 import json
 import mimetypes
 import re
@@ -330,6 +331,7 @@ class ContextWindowManager:
         ddl_statements = [
             'ALTER TABLE "context_window" ADD COLUMN IF NOT EXISTS "advanced_context_mode" VARCHAR(32) NOT NULL DEFAULT \'norm\'',
             'ALTER TABLE "context_window" ADD COLUMN IF NOT EXISTS "advanced_context_mode_source" VARCHAR(32) NOT NULL DEFAULT \'default\'',
+            'ALTER TABLE "context_window" ADD COLUMN IF NOT EXISTS "memory_recall_seen_items_json" TEXT NOT NULL DEFAULT \'[]\'',
         ]
         for sql in ddl_statements:
             await conn.execute_query(sql)
@@ -359,6 +361,137 @@ class ContextWindowManager:
                 self._windows[window.context_id] = window
                 fixed += 1
         logger.info(f"advanced context mode schema 检查完成: advanced_windows={len(windows)} fixed={fixed}")
+
+    @staticmethod
+    def _normalize_memory_recall_text(value: Any) -> str:
+        return " ".join(str(value or "").replace("\r\n", "\n").replace("\r", "\n").split()).strip()
+
+    @classmethod
+    def _normalize_memory_recall_prompt_item(cls, item: Any) -> Optional[Dict[str, str]]:
+        if not isinstance(item, dict):
+            return None
+        group = cls._normalize_memory_recall_text(item.get("group"))
+        text = cls._normalize_memory_recall_text(item.get("text"))
+        if not text:
+            return None
+        digest = cls._normalize_memory_recall_text(item.get("digest"))
+        if not digest:
+            digest_source = f"{group}\n{text}" if group else text
+            digest = hashlib.sha1(digest_source.encode("utf-8")).hexdigest()
+        return {
+            "group": group,
+            "text": text,
+            "digest": digest,
+        }
+
+    @staticmethod
+    def _load_memory_recall_seen_items(window: DBContextWindow) -> Set[str]:
+        raw = str(getattr(window, "memory_recall_seen_items_json", "") or "[]").strip() or "[]"
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return set()
+        if not isinstance(parsed, list):
+            return set()
+        seen: Set[str] = set()
+        for item in parsed:
+            digest = str(item or "").strip()
+            if digest:
+                seen.add(digest)
+        return seen
+
+    @staticmethod
+    def _dump_memory_recall_seen_items(seen: Set[str]) -> str:
+        normalized = sorted({str(item or "").strip() for item in (seen or set()) if str(item or "").strip()})
+        return json.dumps(normalized, ensure_ascii=False)
+
+    @classmethod
+    def _render_memory_recall_delta_text(cls, items: List[Dict[str, str]]) -> str:
+        lines: List[str] = ["记忆："]
+        current_group = ""
+        for item in items:
+            group = cls._normalize_memory_recall_text(item.get("group"))
+            text = cls._normalize_memory_recall_text(item.get("text"))
+            if not text:
+                continue
+            if group and group != current_group:
+                lines.append(group)
+                current_group = group
+            lines.append(f"- {text}")
+        return "\n".join(lines).strip()
+
+    async def record_memory_recall_delta(
+        self,
+        window: DBContextWindow,
+        prompt_items: List[Dict[str, str]],
+        *,
+        source_chat_key: str,
+        source_message_id: str,
+    ) -> tuple[int, int]:
+        context_id = str(getattr(window, "context_id", "") or "").strip()
+        if not context_id or not isinstance(prompt_items, list):
+            return 0, 0
+
+        seen = self._load_memory_recall_seen_items(window)
+        delta_items: List[Dict[str, str]] = []
+        delta_digests: Set[str] = set()
+
+        for raw_item in prompt_items:
+            item = self._normalize_memory_recall_prompt_item(raw_item)
+            if not item:
+                continue
+            digest = item["digest"]
+            if digest in seen or digest in delta_digests:
+                continue
+            delta_items.append(item)
+            delta_digests.add(digest)
+
+        if not delta_items:
+            logger.info(f"memory recall delta skipped: ctx={context_id} new_items=0")
+            return 0, 0
+
+        rendered_text = self._render_memory_recall_delta_text(delta_items)
+        if not rendered_text:
+            logger.warning(f"memory recall delta render empty: ctx={context_id} new_items={len(delta_items)}")
+            return 0, 0
+
+        created_id = 0
+        try:
+            async with in_transaction() as conn:
+                created = await DBContextMessage.create(
+                    using_db=conn,
+                    context_id=context_id,
+                    role="user",
+                    sender_id="system",
+                    sender_name="",
+                    parts_json=json.dumps([{"type": "text", "text": rendered_text}], ensure_ascii=False),
+                    source_chat_key=str(source_chat_key or "").strip(),
+                    source_message_id=str(source_message_id or "").strip(),
+                    msg_type="memory_inject",
+                )
+                created_id = int(getattr(created, "id", 0) or 0)
+
+                db_window = await DBContextWindow.get(context_id=context_id).using_db(conn)
+                updated_seen = self._load_memory_recall_seen_items(db_window)
+                updated_seen.update(delta_digests)
+                db_window.memory_recall_seen_items_json = self._dump_memory_recall_seen_items(updated_seen)
+                await db_window.save(using_db=conn, update_fields=["memory_recall_seen_items_json", "updated_at"])
+                window.memory_recall_seen_items_json = db_window.memory_recall_seen_items_json
+
+            self._windows[context_id] = window
+            await self.enforce_history_hard_limit(context_id)
+            logger.info(
+                f"memory recall delta recorded: ctx={context_id} new_items={len(delta_items)} "
+                f"source_chat={source_chat_key} context_msg_id={created_id}"
+            )
+            return len(delta_items), created_id
+        except Exception as e:
+            logger.error(
+                f"memory recall delta record failed: ctx={context_id} source_chat={source_chat_key} "
+                f"error={type(e).__name__}: {e}",
+                exc_info=True,
+            )
+            return 0, 0
 
     async def set_advanced_context_mode(
         self,
@@ -480,6 +613,7 @@ class ContextWindowManager:
             "summary_generating",
             "pending_summary",
             "pending_summary_ready",
+            "memory_recall_seen_items_json",
             "auto_memory_last_context_msg_id",
             "auto_memory_pending_count",
             "auto_memory_generating",
@@ -499,6 +633,7 @@ class ContextWindowManager:
             item.summary_generating = False
             item.pending_summary = ""
             item.pending_summary_ready = False
+            item.memory_recall_seen_items_json = "[]"
             item.auto_memory_last_context_msg_id = 0
             item.auto_memory_pending_count = 0
             item.auto_memory_generating = False
@@ -770,7 +905,9 @@ class ContextWindowManager:
             deleted = 0
 
             async with in_transaction() as conn:
-                total = await DBContextMessage.filter(context_id=context_id).using_db(conn).count()
+                total = await DBContextMessage.filter(context_id=context_id).exclude(
+                    msg_type="memory_inject"
+                ).using_db(conn).count()
                 if total < threshold:
                     break
 
@@ -781,6 +918,7 @@ class ContextWindowManager:
                 current_batch_size = min(batch_size, deletable_count)
                 archive_batch = (
                     await DBContextMessage.filter(context_id=context_id)
+                    .exclude(msg_type="memory_inject")
                     .using_db(conn)
                     .order_by("id")
                     .limit(current_batch_size)
@@ -842,7 +980,9 @@ class ContextWindowManager:
 
                 deleted = await DBContextMessage.filter(id__in=archive_ids).using_db(conn).delete()
                 deleted_total += int(deleted or 0)
-                total = await DBContextMessage.filter(context_id=context_id).using_db(conn).count()
+                total = await DBContextMessage.filter(context_id=context_id).exclude(
+                    msg_type="memory_inject"
+                ).using_db(conn).count()
 
             loop_count += 1
             logger.info(
@@ -855,7 +995,7 @@ class ContextWindowManager:
                 total,
             )
 
-        final_total = await DBContextMessage.filter(context_id=context_id).count()
+        final_total = await DBContextMessage.filter(context_id=context_id).exclude(msg_type="memory_inject").count()
         if final_total >= threshold:
             logger.warning(
                 "普通 context 历史归档后仍高于阈值: ctx=%s threshold=%s remain=%s loops=%s",
@@ -890,17 +1030,18 @@ class ContextWindowManager:
             return deleted
 
         hard_limit = int(self.max_history_before_compress * self.hard_limit_ratio)
-        total = await DBContextMessage.filter(context_id=context_id).count()
+        regular_query = DBContextMessage.filter(context_id=context_id).exclude(msg_type="memory_inject")
+        total = await regular_query.count()
         if total <= hard_limit:
             return 0
 
         keep_ids = (
-            await DBContextMessage.filter(context_id=context_id)
+            await regular_query
             .order_by("-id")
             .limit(hard_limit)
             .values_list("id", flat=True)
         )
-        deleted = await DBContextMessage.filter(context_id=context_id).exclude(id__in=keep_ids).delete()
+        deleted = await regular_query.exclude(id__in=keep_ids).delete()
         logger.warning(f"上下文窗口 {context_id} 超出硬上限 {hard_limit}，滑动删除最旧 {deleted} 条")
         return int(deleted or 0)
 
@@ -1131,17 +1272,20 @@ class ContextWindowManager:
         else:
             effective_limit = int(self.max_history_before_compress * self.hard_limit_ratio)
 
-        # 先取总数，如果超限则只取最新的
-        total = await DBContextMessage.filter(context_id=context_id).count()
-        query = DBContextMessage.filter(context_id=context_id).order_by("id")
-        if total > effective_limit:
-            # 只取最新的 effective_limit 条
-            query = DBContextMessage.filter(context_id=context_id).order_by("-id").limit(effective_limit)
-            db_messages = await query.all()
-            db_messages.reverse()  # 恢复时间顺序
-            logger.debug(f"历史截断: {context_id} 总{total}条，只取最新{effective_limit}条")
+        regular_query = DBContextMessage.filter(context_id=context_id).exclude(msg_type="memory_inject")
+        memory_inject_query = DBContextMessage.filter(context_id=context_id, msg_type="memory_inject").order_by("id")
+        regular_total = await regular_query.count()
+        if regular_total > effective_limit:
+            regular_messages = await regular_query.order_by("-id").limit(effective_limit).all()
+            regular_messages.reverse()
+            logger.debug(f"历史截断: {context_id} 普通历史总{regular_total}条，只取最新{effective_limit}条")
         else:
-            db_messages = await query.all()
+            regular_messages = await regular_query.order_by("id").all()
+        memory_inject_messages = await memory_inject_query.all()
+        db_messages = sorted(
+            [*regular_messages, *memory_inject_messages],
+            key=lambda item: int(getattr(item, "id", 0) or 0),
+        )
 
         window = await self._get_window(context_id)
         active_dialog_id = str(getattr(window, "active_dialog_id", "") or "").strip()

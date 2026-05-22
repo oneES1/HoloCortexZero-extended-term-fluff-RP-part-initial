@@ -138,6 +138,24 @@ async def run_agent_v2(
         context_window=context_window,
         trigger_user_id=user_id,
     )
+    prompt_items = memory_recall_meta.get("prompt_items") if isinstance(memory_recall_meta, dict) else []
+    memory_delta_source_chat_key = str(context_window.active_dialog_id or chat_key or "").strip()
+    memory_delta_source_message_id = (
+        f"memory_recall:{chat_message.message_id}"
+        if chat_message and getattr(chat_message, "message_id", None)
+        else f"memory_recall:{int(time.time())}"
+    )
+    delta_count, delta_context_msg_id = await context_window_manager.record_memory_recall_delta(
+        context_window,
+        prompt_items if isinstance(prompt_items, list) else [],
+        source_chat_key=memory_delta_source_chat_key,
+        source_message_id=memory_delta_source_message_id,
+    )
+    if delta_count:
+        logger.info(
+            f"run_agent_v2 memory delta injected: ctx={context_window.context_id} "
+            f"chat={memory_delta_source_chat_key} items={delta_count} context_msg_id={delta_context_msg_id}"
+        )
     stage1_topic_mode = memory_recall_meta.get("topic_mode") if isinstance(memory_recall_meta, dict) else {}
     if isinstance(stage1_topic_mode, dict) and str(stage1_topic_mode.get("mode") or "").upper() == "B":
         deep_reason = str(stage1_topic_mode.get("reason") or "").strip()
@@ -324,7 +342,6 @@ async def run_agent_v2(
             platform_name=db_channel.adapter_key,
             impression_image_url=impression_url,
             reference_image_paths_text=ref_paths_text,
-            memory_recall=memory_recall_text,
             cache_domain=cache_domain,
         )
 

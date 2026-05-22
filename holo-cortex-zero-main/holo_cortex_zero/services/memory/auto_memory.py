@@ -537,7 +537,6 @@ class AutoMemoryService:
                         "channel_type": env.channel_type,
                         "channel_id": env.channel_id,
                         "chat_env_note": env.chat_env_note,
-                        "chat_env_system": env.chat_env_system,
                     },
                 },
             )

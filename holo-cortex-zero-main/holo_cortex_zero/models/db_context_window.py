@@ -54,6 +54,10 @@ class DBContextWindow(Model):
     summary_generating = fields.BooleanField(default=False, description="正在异步生成新摘要")
     pending_summary = fields.TextField(default="", null=True, description="生成完成但未应用的新摘要")
     pending_summary_ready = fields.BooleanField(default=False, description="新摘要已确认可用")
+    memory_recall_seen_items_json = fields.TextField(
+        default="[]",
+        description="该 context 已注入过的记忆项摘要指纹集合(JSON)",
+    )
 
     # 自动记忆状态
     auto_memory_last_context_msg_id = fields.IntField(default=0, description="自动记忆已处理到的最新 context_message.id")
@@ -153,7 +157,7 @@ class DBContextMessage(Model):
     # 消息分类
     msg_type = fields.CharField(
         max_length=32, default="human_chat",
-        description="消息类型: human_chat | bot_reply | tool_call | tool_result | system_inject | history_only",
+        description="消息类型: human_chat | bot_reply | tool_call | tool_result | system_inject | memory_inject | history_only",
     )
 
     created_at = fields.DatetimeField(auto_now_add=True, description="创建时间")
