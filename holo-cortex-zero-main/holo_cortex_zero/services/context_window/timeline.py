@@ -142,10 +142,10 @@ class TimelineService:
         3. 调用辅助 LLM 生成摘要
         4. 写入 pending_summary
         """
-        # 1. 读取所有历史消息
+        # 1. 读取所有可压缩历史消息；memory_inject 只参与 live window，不进入长期摘要
         messages = await DBContextMessage.filter(
             context_id=context_id,
-        ).order_by("id").all()
+        ).exclude(msg_type="memory_inject").order_by("id").all()
 
         if not messages:
             return

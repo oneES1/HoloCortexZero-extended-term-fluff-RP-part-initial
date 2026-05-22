@@ -159,6 +159,14 @@ class DBContextMessage(Model):
         max_length=32, default="human_chat",
         description="消息类型: human_chat | bot_reply | tool_call | tool_result | system_inject | memory_inject | history_only",
     )
+    memory_anchor_context_msg_id = fields.IntField(
+        default=0,
+        description="memory_inject 依附的聊天消息水位 context_message.id；非 memory_inject 固定为 0",
+    )
+    memory_digests_json = fields.TextField(
+        default="[]",
+        description="memory_inject 包含的记忆 digest 集合(JSON)；非 memory_inject 固定为 []",
+    )
 
     created_at = fields.DatetimeField(auto_now_add=True, description="创建时间")
 

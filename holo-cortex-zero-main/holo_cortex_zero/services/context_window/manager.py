@@ -46,6 +46,7 @@ class ContextWindowManager:
     # 全局正则：彻底清除 [数字|名字] 格式前缀，防止 bot 模仿
     _ID_NAME_PATTERN = re.compile(r'\[[\d]+\|[^\]]+\]\s*')
     _RISK_DISPLAY_NAME = "风险用户"
+    _COUNTABLE_CHAT_MSG_TYPES = ("human_chat", "bot_reply")
     _NORMAL_CONTEXT_ARCHIVE_SAMPLE_STRIDE = 5
     _NORMAL_CONTEXT_ARCHIVE_MAX_BLOCKS = 6
     _NORMAL_CONTEXT_ARCHIVE_HEADER_PREFIX = "【较早历史归档 "
@@ -108,6 +109,61 @@ class ContextWindowManager:
         except Exception:
             ratio = 1.2
         return max(1.0, ratio)
+
+    @classmethod
+    def _countable_chat_query(cls, context_id: str):
+        return DBContextMessage.filter(
+            context_id=context_id,
+            msg_type__in=list(cls._COUNTABLE_CHAT_MSG_TYPES),
+        )
+
+    @staticmethod
+    def _regular_history_query(context_id: str):
+        return DBContextMessage.filter(context_id=context_id).exclude(msg_type="memory_inject")
+
+    @staticmethod
+    def _memory_inject_query(context_id: str):
+        return DBContextMessage.filter(context_id=context_id, msg_type="memory_inject")
+
+    async def _count_countable_chat_messages(
+        self,
+        context_id: str,
+        *,
+        using_db: Any | None = None,
+    ) -> int:
+        query = self._countable_chat_query(context_id)
+        if using_db is not None:
+            query = query.using_db(using_db)
+        return int(await query.count() or 0)
+
+    async def _get_latest_countable_chat_context_msg_id(
+        self,
+        context_id: str,
+        *,
+        using_db: Any | None = None,
+    ) -> int:
+        query = self._countable_chat_query(context_id).order_by("-id").limit(1)
+        if using_db is not None:
+            query = query.using_db(using_db)
+        ids = await query.values_list("id", flat=True)
+        return int(ids[0]) if ids else 0
+
+    async def _get_countable_chat_cutoff_id(
+        self,
+        context_id: str,
+        *,
+        keep_recent: int,
+        using_db: Any | None = None,
+    ) -> tuple[int, int]:
+        query = self._countable_chat_query(context_id).order_by("id")
+        if using_db is not None:
+            query = query.using_db(using_db)
+        ids = [int(item) for item in await query.values_list("id", flat=True)]
+        total = len(ids)
+        if total <= keep_recent:
+            return 0, total
+        cutoff_index = total - keep_recent - 1
+        return int(ids[cutoff_index]), total
 
     async def _get_or_bootstrap_dialog_state(
         self,
@@ -332,6 +388,8 @@ class ContextWindowManager:
             'ALTER TABLE "context_window" ADD COLUMN IF NOT EXISTS "advanced_context_mode" VARCHAR(32) NOT NULL DEFAULT \'norm\'',
             'ALTER TABLE "context_window" ADD COLUMN IF NOT EXISTS "advanced_context_mode_source" VARCHAR(32) NOT NULL DEFAULT \'default\'',
             'ALTER TABLE "context_window" ADD COLUMN IF NOT EXISTS "memory_recall_seen_items_json" TEXT NOT NULL DEFAULT \'[]\'',
+            'ALTER TABLE "context_message" ADD COLUMN IF NOT EXISTS "memory_anchor_context_msg_id" INT NOT NULL DEFAULT 0',
+            'ALTER TABLE "context_message" ADD COLUMN IF NOT EXISTS "memory_digests_json" TEXT NOT NULL DEFAULT \'[]\'',
         ]
         for sql in ddl_statements:
             await conn.execute_query(sql)
@@ -406,6 +464,105 @@ class ContextWindowManager:
         return json.dumps(normalized, ensure_ascii=False)
 
     @classmethod
+    def _extract_memory_recall_digests_from_text(cls, text: str) -> Set[str]:
+        digests: Set[str] = set()
+        current_group = ""
+        for raw_line in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+            line = cls._normalize_memory_recall_text(raw_line)
+            if not line or line == "记忆：":
+                continue
+            if line.startswith("- "):
+                item_text = cls._normalize_memory_recall_text(line[2:])
+                if not item_text:
+                    continue
+                digest_source = f"{current_group}\n{item_text}" if current_group else item_text
+                digests.add(hashlib.sha1(digest_source.encode("utf-8")).hexdigest())
+                continue
+            current_group = line
+        return digests
+
+    @classmethod
+    def _extract_memory_recall_digests_from_db_msg(cls, db_msg: Any) -> Set[str]:
+        raw = str(getattr(db_msg, "memory_digests_json", "") or "[]").strip() or "[]"
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            digests = {
+                cls._normalize_memory_recall_text(item)
+                for item in parsed
+                if cls._normalize_memory_recall_text(item)
+            }
+            if digests:
+                return digests
+
+        texts: List[str] = []
+        for part in cls._parse_parts_json(getattr(db_msg, "parts_json", "[]") or "[]"):
+            if str(getattr(part, "type", "") or "") != "text":
+                continue
+            text = str(getattr(part, "text", "") or "").strip()
+            if text:
+                texts.append(text)
+        return cls._extract_memory_recall_digests_from_text("\n".join(texts))
+
+    async def _rebuild_memory_recall_seen_items_json(
+        self,
+        context_id: str,
+        *,
+        using_db: Any | None = None,
+    ) -> str:
+        query = self._memory_inject_query(context_id).order_by("id")
+        if using_db is not None:
+            query = query.using_db(using_db)
+        messages = await query.all()
+        seen: Set[str] = set()
+        for item in messages:
+            seen.update(self._extract_memory_recall_digests_from_db_msg(item))
+        return self._dump_memory_recall_seen_items(seen)
+
+    async def _sync_memory_recall_seen_items_window(
+        self,
+        context_id: str,
+        *,
+        using_db: Any | None = None,
+        window: Optional[DBContextWindow] = None,
+    ) -> str:
+        rebuilt = await self._rebuild_memory_recall_seen_items_json(context_id, using_db=using_db)
+        db_window = window
+        if db_window is None:
+            query = DBContextWindow.get_or_none(context_id=context_id)
+            if using_db is not None:
+                query = query.using_db(using_db)
+            db_window = await query
+        if db_window and str(getattr(db_window, "memory_recall_seen_items_json", "") or "[]") != rebuilt:
+            db_window.memory_recall_seen_items_json = rebuilt
+            if using_db is not None:
+                await db_window.save(using_db=using_db, update_fields=["memory_recall_seen_items_json", "updated_at"])
+            else:
+                await db_window.save(update_fields=["memory_recall_seen_items_json", "updated_at"])
+        if db_window:
+            self._windows[context_id] = db_window
+        return rebuilt
+
+    async def _delete_memory_injects_for_cutoff(
+        self,
+        context_id: str,
+        *,
+        cutoff_chat_msg_id: int,
+        using_db: Any | None = None,
+    ) -> int:
+        if cutoff_chat_msg_id <= 0:
+            return 0
+        query = self._memory_inject_query(context_id).filter(
+            memory_anchor_context_msg_id__lte=int(cutoff_chat_msg_id),
+        )
+        if using_db is not None:
+            query = query.using_db(using_db)
+        deleted = await query.delete()
+        return int(deleted or 0)
+
+    @classmethod
     def _render_memory_recall_delta_text(cls, items: List[Dict[str, str]]) -> str:
         lines: List[str] = ["记忆："]
         current_group = ""
@@ -456,8 +613,13 @@ class ContextWindowManager:
             return 0, 0
 
         created_id = 0
+        memory_anchor_context_msg_id = 0
         try:
             async with in_transaction() as conn:
+                memory_anchor_context_msg_id = await self._get_latest_countable_chat_context_msg_id(
+                    context_id,
+                    using_db=conn,
+                )
                 created = await DBContextMessage.create(
                     using_db=conn,
                     context_id=context_id,
@@ -468,6 +630,8 @@ class ContextWindowManager:
                     source_chat_key=str(source_chat_key or "").strip(),
                     source_message_id=str(source_message_id or "").strip(),
                     msg_type="memory_inject",
+                    memory_anchor_context_msg_id=memory_anchor_context_msg_id,
+                    memory_digests_json=self._dump_memory_recall_seen_items(delta_digests),
                 )
                 created_id = int(getattr(created, "id", 0) or 0)
 
@@ -482,7 +646,8 @@ class ContextWindowManager:
             await self.enforce_history_hard_limit(context_id)
             logger.info(
                 f"memory recall delta recorded: ctx={context_id} new_items={len(delta_items)} "
-                f"source_chat={source_chat_key} context_msg_id={created_id}"
+                f"source_chat={source_chat_key} context_msg_id={created_id} "
+                f"anchor_ctx_msg_id={memory_anchor_context_msg_id}"
             )
             return len(delta_items), created_id
         except Exception as e:
@@ -895,117 +1060,106 @@ class ContextWindowManager:
 
     async def _archive_normal_context_history(self, context_id: str, *, threshold: int, keep_recent: int) -> int:
         """普通 context 到阈值后：抽样旧前缀为纯文本归档，再回收原历史。"""
-        batch_size = max(1, threshold - keep_recent)
-        deleted_total = 0
-        loop_count = 0
+        archive_line_count = 0
+        sampled_line_count = 0
+        deleted_regular = 0
+        deleted_memory = 0
+        cutoff_chat_msg_id = 0
 
-        while loop_count < 8:
-            archive_line_count = 0
-            sampled_line_count = 0
-            deleted = 0
+        async with in_transaction() as conn:
+            total_chat = await self._count_countable_chat_messages(context_id, using_db=conn)
+            if total_chat < threshold:
+                return 0
 
-            async with in_transaction() as conn:
-                total = await DBContextMessage.filter(context_id=context_id).exclude(
-                    msg_type="memory_inject"
-                ).using_db(conn).count()
-                if total < threshold:
-                    break
+            cutoff_chat_msg_id, total_chat = await self._get_countable_chat_cutoff_id(
+                context_id,
+                keep_recent=keep_recent,
+                using_db=conn,
+            )
+            if cutoff_chat_msg_id <= 0:
+                return 0
 
-                deletable_count = total - keep_recent
-                if deletable_count <= 0:
-                    break
+            archive_batch = (
+                await self._regular_history_query(context_id)
+                .filter(id__lte=cutoff_chat_msg_id)
+                .using_db(conn)
+                .order_by("id")
+                .all()
+            )
+            if not archive_batch:
+                return 0
 
-                current_batch_size = min(batch_size, deletable_count)
-                archive_batch = (
-                    await DBContextMessage.filter(context_id=context_id)
-                    .exclude(msg_type="memory_inject")
-                    .using_db(conn)
-                    .order_by("id")
-                    .limit(current_batch_size)
-                    .all()
+            archive_lines: List[str] = []
+            for ctx_msg in archive_batch:
+                rendered_line = self._render_archive_line_from_context_msg(ctx_msg)
+                if rendered_line:
+                    archive_lines.append(rendered_line)
+
+            archive_line_count = len(archive_lines)
+
+            window = await DBContextWindow.get_or_none(context_id=context_id).using_db(conn)
+            if not window:
+                logger.warning("普通 context 历史归档缺少窗口，已中止删除: ctx=%s", context_id)
+                return 0
+
+            if archive_lines:
+                sampled_lines = self._sample_archive_lines(archive_lines)
+                sampled_line_count = len(sampled_lines)
+                archive_block = self._build_normal_context_archive_block(
+                    sampled_lines,
+                    source_line_count=archive_line_count,
                 )
-                if not archive_batch:
-                    break
-
-                archive_lines: List[str] = []
-                archive_ids: List[int] = []
-                for ctx_msg in archive_batch:
-                    archive_ids.append(int(ctx_msg.id))
-                    rendered_line = self._render_archive_line_from_context_msg(ctx_msg)
-                    if rendered_line:
-                        archive_lines.append(rendered_line)
-
-                archive_line_count = len(archive_lines)
-
-                if archive_lines:
-                    sampled_lines = self._sample_archive_lines(archive_lines)
-                    sampled_line_count = len(sampled_lines)
-                    archive_block = self._build_normal_context_archive_block(
-                        sampled_lines,
-                        source_line_count=archive_line_count,
-                    )
-                    if not archive_block:
-                        logger.warning(
-                            "普通 context 历史归档块为空，已中止删除: ctx=%s batch=%s source_lines=%s",
-                            context_id,
-                            loop_count + 1,
-                            archive_line_count,
-                        )
-                        return deleted_total
-
-                    window = await DBContextWindow.get_or_none(context_id=context_id).using_db(conn)
-                    if not window:
-                        logger.warning(
-                            "普通 context 历史归档缺少窗口，已中止删除: ctx=%s batch=%s",
-                            context_id,
-                            loop_count + 1,
-                        )
-                        return deleted_total
-
-                    merged_archive = self._merge_normal_context_archive_blocks(
-                        window.compressed_summary,
-                        archive_block,
-                    )
-                    if merged_archive != str(window.compressed_summary or ""):
-                        window.compressed_summary = merged_archive
-                        await window.save(using_db=conn, update_fields=["compressed_summary", "updated_at"])
-                    self._windows[context_id] = window
-                else:
-                    logger.info(
-                        "普通 context 历史归档批次无文本，执行纯清理: ctx=%s batch=%s candidates=%s",
+                if not archive_block:
+                    logger.warning(
+                        "普通 context 历史归档块为空，已中止删除: ctx=%s source_lines=%s",
                         context_id,
-                        loop_count + 1,
-                        len(archive_batch),
+                        archive_line_count,
                     )
+                    return 0
 
-                deleted = await DBContextMessage.filter(id__in=archive_ids).using_db(conn).delete()
-                deleted_total += int(deleted or 0)
-                total = await DBContextMessage.filter(context_id=context_id).exclude(
-                    msg_type="memory_inject"
-                ).using_db(conn).count()
+                merged_archive = self._merge_normal_context_archive_blocks(
+                    window.compressed_summary,
+                    archive_block,
+                )
+                if merged_archive != str(window.compressed_summary or ""):
+                    window.compressed_summary = merged_archive
+                    await window.save(using_db=conn, update_fields=["compressed_summary", "updated_at"])
+            else:
+                logger.info("普通 context 历史归档批次无文本，执行纯清理: ctx=%s candidates=%s", context_id, len(archive_batch))
 
-            loop_count += 1
-            logger.info(
-                "普通 context 历史归档完成: ctx=%s batch=%s source_lines=%s sampled_lines=%s deleted=%s remain=%s",
-                context_id,
-                loop_count,
-                archive_line_count,
-                sampled_line_count,
-                deleted,
-                total,
+            deleted_regular = int(
+                await self._regular_history_query(context_id)
+                .filter(id__lte=cutoff_chat_msg_id)
+                .using_db(conn)
+                .delete() or 0
             )
+            deleted_memory = await self._delete_memory_injects_for_cutoff(
+                context_id,
+                cutoff_chat_msg_id=cutoff_chat_msg_id,
+                using_db=conn,
+            )
+            rebuilt_seen = await self._sync_memory_recall_seen_items_window(
+                context_id,
+                using_db=conn,
+                window=window,
+            )
+            window.memory_recall_seen_items_json = rebuilt_seen
+            self._windows[context_id] = window
 
-        final_total = await DBContextMessage.filter(context_id=context_id).exclude(msg_type="memory_inject").count()
-        if final_total >= threshold:
+        remain_chat = await self._count_countable_chat_messages(context_id)
+        logger.info(
+            f"普通 context 历史归档完成: ctx={context_id} cutoff_chat_msg_id={cutoff_chat_msg_id} "
+            f"source_lines={archive_line_count} sampled_lines={sampled_line_count} "
+            f"deleted_regular={deleted_regular} deleted_memory={deleted_memory} remain_chat={remain_chat}"
+        )
+
+        if remain_chat >= threshold:
             logger.warning(
-                "普通 context 历史归档后仍高于阈值: ctx=%s threshold=%s remain=%s loops=%s",
-                context_id,
-                threshold,
-                final_total,
-                loop_count,
+                f"普通 context 历史归档后仍高于阈值: ctx={context_id} "
+                f"threshold={threshold} remain_chat={remain_chat}"
             )
 
-        return deleted_total
+        return int(deleted_regular + deleted_memory)
 
     async def enforce_history_hard_limit(self, context_id: str) -> int:
         """上下文窗口硬限制：超过 120 条时滑动删除最旧消息。"""
@@ -1030,20 +1184,45 @@ class ContextWindowManager:
             return deleted
 
         hard_limit = int(self.max_history_before_compress * self.hard_limit_ratio)
-        regular_query = DBContextMessage.filter(context_id=context_id).exclude(msg_type="memory_inject")
-        total = await regular_query.count()
+        total = await self._count_countable_chat_messages(context_id)
         if total <= hard_limit:
             return 0
 
-        keep_ids = (
-            await regular_query
-            .order_by("-id")
-            .limit(hard_limit)
-            .values_list("id", flat=True)
+        cutoff_chat_msg_id, _ = await self._get_countable_chat_cutoff_id(
+            context_id,
+            keep_recent=hard_limit,
         )
-        deleted = await regular_query.exclude(id__in=keep_ids).delete()
-        logger.warning(f"上下文窗口 {context_id} 超出硬上限 {hard_limit}，滑动删除最旧 {deleted} 条")
-        return int(deleted or 0)
+        if cutoff_chat_msg_id <= 0:
+            return 0
+
+        async with in_transaction() as conn:
+            deleted_regular = int(
+                await self._regular_history_query(context_id)
+                .filter(id__lte=cutoff_chat_msg_id)
+                .using_db(conn)
+                .delete() or 0
+            )
+            deleted_memory = await self._delete_memory_injects_for_cutoff(
+                context_id,
+                cutoff_chat_msg_id=cutoff_chat_msg_id,
+                using_db=conn,
+            )
+            rebuilt_seen = await self._sync_memory_recall_seen_items_window(
+                context_id,
+                using_db=conn,
+            )
+            window = await DBContextWindow.get_or_none(context_id=context_id).using_db(conn)
+            if window:
+                window.memory_recall_seen_items_json = rebuilt_seen
+                self._windows[context_id] = window
+
+        deleted = int(deleted_regular + deleted_memory)
+        logger.warning(
+            f"上下文窗口 {context_id} 超出硬上限 {hard_limit}，按聊天水位滑动清理: "
+            f"cutoff_chat_msg_id={cutoff_chat_msg_id} "
+            f"deleted_regular={deleted_regular} deleted_memory={deleted_memory}"
+        )
+        return deleted
 
     @staticmethod
     def _is_system_db_msg(db_msg: Any) -> bool:
@@ -1408,8 +1587,8 @@ class ContextWindowManager:
             logger.info("普通 context 已改走归档式回收，不触发旧 timeline: ctx=%s", context_id)
             return False
 
-        # 直接查 DB 实际条数，不依赖内存计数器
-        actual_count = await DBContextMessage.filter(context_id=context_id).count()
+        # 高级 context 的压缩水位只看聊天消息，不让 memory/tool 内部片段改变触发线
+        actual_count = await self._count_countable_chat_messages(context_id)
 
         from holo_cortex_zero.services.context_window.timeline import timeline_service
         return await timeline_service.maybe_trigger(
@@ -1477,23 +1656,38 @@ class ContextWindowManager:
         window.compressed_summary = new_summary
         window.last_compress_version += 1
 
-        # 2. 清理历史到只保留最新 keep_recent 条
-        total = await DBContextMessage.filter(context_id=context_id).count()
-        if total > self.keep_recent_after_compress:
-            # 删除最旧的消息，只保留最新的 keep_recent 条
-            keep_ids = (
-                await DBContextMessage.filter(context_id=context_id)
-                .order_by("-id")
-                .limit(self.keep_recent_after_compress)
-                .values_list("id", flat=True)
+        deleted_regular = 0
+        deleted_memory = 0
+        total_chat = await self._count_countable_chat_messages(context_id)
+        if total_chat > self.keep_recent_after_compress:
+            cutoff_chat_msg_id, _ = await self._get_countable_chat_cutoff_id(
+                context_id,
+                keep_recent=self.keep_recent_after_compress,
             )
-            await DBContextMessage.filter(
-                context_id=context_id
-            ).exclude(id__in=keep_ids).delete()
-
-            logger.info(
-                f"上下文窗口 {context_id} 压缩清理: {total} → {self.keep_recent_after_compress} 条"
-            )
+            if cutoff_chat_msg_id > 0:
+                async with in_transaction() as conn:
+                    deleted_regular = int(
+                        await self._regular_history_query(context_id)
+                        .filter(id__lte=cutoff_chat_msg_id)
+                        .using_db(conn)
+                        .delete() or 0
+                    )
+                    deleted_memory = await self._delete_memory_injects_for_cutoff(
+                        context_id,
+                        cutoff_chat_msg_id=cutoff_chat_msg_id,
+                        using_db=conn,
+                    )
+                    rebuilt_seen = await self._sync_memory_recall_seen_items_window(
+                        context_id,
+                        using_db=conn,
+                        window=window,
+                    )
+                    window.memory_recall_seen_items_json = rebuilt_seen
+                logger.info(
+                    f"上下文窗口 {context_id} 压缩清理: total_chat={total_chat} "
+                    f"keep_chat={self.keep_recent_after_compress} cutoff_chat_msg_id={cutoff_chat_msg_id} "
+                    f"deleted_regular={deleted_regular} deleted_memory={deleted_memory}"
+                )
 
         # 3. 重置计数器和 pending 标记
         window.msg_count_since_compress = 0
@@ -1505,6 +1699,7 @@ class ContextWindowManager:
                 "compressed_summary",
                 "last_compress_version",
                 "msg_count_since_compress",
+                "memory_recall_seen_items_json",
                 "pending_summary",
                 "pending_summary_ready",
                 "summary_generating",
