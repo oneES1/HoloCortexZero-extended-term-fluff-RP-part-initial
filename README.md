@@ -1,4 +1,6 @@
-# Holo Cortex Zero
+# HoloCortexZero-fluff-RP-part-2.3
+
+# 2026.5.22 更新context结构，8K上下文时缓存率达到99%以上，是通用更新；顺便增加deepseek user_id 显式缓存隔离提高稳定性
 
 HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是真正HCZ的起步练习作。从26年1月15号左右上线第一版，快速迭代和维护，特点是：
 
@@ -6,7 +8,7 @@ HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是
 
 - 2.上下文在**多人类用户跨群聊/平台**时仍保证连贯；无需担心多群聊私聊并发冲突。无需担心bot不记得刚刚在另一个消息平台的私聊内容
 
-- 3.支持思维链回填，支持多种缓存协议；缓存率平均80%，允许随时切换各个协议： gemini协议 全模态（图片语音视频），deepseek-v4 toolcall（必须开启回填），responses，chat等发射器协议
+- 3.支持思维链回填，支持多种缓存协议；缓存率平均98%，允许随时切换各个协议： gemini协议 全模态（图片语音视频），deepseek-v4 toolcall（必须开启回填），responses，chat等发射器协议
 
 - 4.为长期RP优化记忆：图谱索引+LLM检索+embedding，代码与仲裁LLM结合保证**复杂多用户鲁棒性**
 
@@ -34,7 +36,6 @@ HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是
 ## Mac/Win 客户端程序下载地址见：（做好了会在这写）
 ## Linux源码部署文档：[中文](README_DEPLOY.md) and [English](README_DEPLOY_EN.md).
 
-# 5.22 增加deepseek user_id 显式缓存隔离，修复打断缓存的设计
 
 # 目录
 - 0.RP part宗旨：
