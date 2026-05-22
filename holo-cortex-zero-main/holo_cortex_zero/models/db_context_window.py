@@ -56,7 +56,7 @@ class DBContextWindow(Model):
     pending_summary_ready = fields.BooleanField(default=False, description="新摘要已确认可用")
     memory_recall_seen_items_json = fields.TextField(
         default="[]",
-        description="该 context 已注入过的记忆项摘要指纹集合(JSON)",
+        description="当前 context 中仍存活的 memory_inject 所携带的原生 memory id 集合(JSON)",
     )
 
     # 自动记忆状态
@@ -165,7 +165,7 @@ class DBContextMessage(Model):
     )
     memory_digests_json = fields.TextField(
         default="[]",
-        description="memory_inject 包含的记忆 digest 集合(JSON)；非 memory_inject 固定为 []",
+        description="memory_inject 包含的原生 memory id 集合(JSON)；非 memory_inject 固定为 []",
     )
 
     created_at = fields.DatetimeField(auto_now_add=True, description="创建时间")

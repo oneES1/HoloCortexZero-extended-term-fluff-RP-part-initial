@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-import hashlib
 import json
 import mimetypes
 import re
@@ -428,15 +427,19 @@ class ContextWindowManager:
     def _normalize_memory_recall_prompt_item(cls, item: Any) -> Optional[Dict[str, str]]:
         if not isinstance(item, dict):
             return None
-        group = cls._normalize_memory_recall_text(item.get("group"))
+        memory_id = cls._normalize_memory_recall_text(item.get("memory_id"))
+        user_id = cls._normalize_memory_recall_text(item.get("user_id"))
+        time_text = cls._normalize_memory_recall_text(item.get("time_text"))
         text = cls._normalize_memory_recall_text(item.get("text"))
-        if not text:
+        confidence = cls._normalize_memory_recall_text(item.get("confidence"))
+        if not memory_id or not user_id or not text:
             return None
-        digest = hashlib.sha1(text.encode("utf-8")).hexdigest()
         return {
-            "group": group,
+            "memory_id": memory_id,
+            "user_id": user_id,
+            "time_text": time_text,
             "text": text,
-            "digest": digest,
+            "confidence": confidence,
         }
 
     @staticmethod
@@ -461,56 +464,7 @@ class ContextWindowManager:
         return json.dumps(normalized, ensure_ascii=False)
 
     @classmethod
-    def _extract_memory_recall_prompt_items_from_text(cls, text: str) -> List[Dict[str, str]]:
-        items: List[Dict[str, str]] = []
-        current_group = ""
-        for raw_line in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-            line = cls._normalize_memory_recall_text(raw_line)
-            if not line or line in {"记忆：", "记忆:"}:
-                continue
-
-            is_header = (
-                line.startswith("【")
-                or line.startswith("Static ")
-                or line.startswith("意图[")
-                or line.startswith("用户:")
-            )
-            if is_header:
-                current_group = line
-                continue
-
-            item_text = cls._normalize_memory_recall_text(line[2:] if line.startswith("- ") else line)
-            if not item_text:
-                continue
-
-            items.append({
-                "group": current_group,
-                "text": item_text,
-                "digest": hashlib.sha1(item_text.encode("utf-8")).hexdigest(),
-            })
-        return items
-
-    @classmethod
-    def _extract_memory_recall_digests_from_text(cls, text: str) -> Set[str]:
-        return {
-            str(item.get("digest") or "").strip()
-            for item in cls._extract_memory_recall_prompt_items_from_text(text)
-            if str(item.get("digest") or "").strip()
-        }
-
-    @classmethod
     def _extract_memory_recall_digests_from_db_msg(cls, db_msg: Any) -> Set[str]:
-        texts: List[str] = []
-        for part in cls._parse_parts_json(getattr(db_msg, "parts_json", "[]") or "[]"):
-            if str(getattr(part, "type", "") or "") != "text":
-                continue
-            text = str(getattr(part, "text", "") or "").strip()
-            if text:
-                texts.append(text)
-        digests_from_text = cls._extract_memory_recall_digests_from_text("\n".join(texts))
-        if digests_from_text:
-            return digests_from_text
-
         raw = str(getattr(db_msg, "memory_digests_json", "") or "[]").strip() or "[]"
         try:
             parsed = json.loads(raw)
@@ -546,13 +500,21 @@ class ContextWindowManager:
         using_db: Any | None = None,
         window: Optional[DBContextWindow] = None,
     ) -> str:
-        rebuilt = await self._rebuild_memory_recall_seen_items_json(context_id, using_db=using_db)
         db_window = window
         if db_window is None:
             query = DBContextWindow.get_or_none(context_id=context_id)
             if using_db is not None:
                 query = query.using_db(using_db)
             db_window = await query
+
+        if db_window and str(getattr(db_window, "memory_recall_seen_items_json", "") or "[]") != "[]":
+            db_window.memory_recall_seen_items_json = "[]"
+            if using_db is not None:
+                await db_window.save(using_db=using_db, update_fields=["memory_recall_seen_items_json", "updated_at"])
+            else:
+                await db_window.save(update_fields=["memory_recall_seen_items_json", "updated_at"])
+
+        rebuilt = await self._rebuild_memory_recall_seen_items_json(context_id, using_db=using_db)
         if db_window and str(getattr(db_window, "memory_recall_seen_items_json", "") or "[]") != rebuilt:
             db_window.memory_recall_seen_items_json = rebuilt
             if using_db is not None:
@@ -582,13 +544,27 @@ class ContextWindowManager:
 
     @classmethod
     def _render_memory_recall_delta_text(cls, items: List[Dict[str, str]]) -> str:
-        lines: List[str] = ["记忆："]
+        grouped: Dict[str, List[Dict[str, str]]] = {}
         for item in items:
+            user_id = cls._normalize_memory_recall_text(item.get("user_id"))
             text = cls._normalize_memory_recall_text(item.get("text"))
-            if not text:
+            if not user_id or not text:
                 continue
-            lines.append(f"- {text}")
-        return "\n".join(lines).strip() if len(lines) > 1 else ""
+            grouped.setdefault(user_id, []).append(item)
+
+        lines: List[str] = []
+        for user_id, user_items in grouped.items():
+            segments: List[str] = []
+            for item in user_items:
+                time_text = cls._normalize_memory_recall_text(item.get("time_text"))
+                text = cls._normalize_memory_recall_text(item.get("text"))
+                confidence = cls._normalize_memory_recall_text(item.get("confidence"))
+                body_parts = [part for part in [time_text, text, f"置信（{confidence}）"] if part]
+                if body_parts:
+                    segments.append(f"（{' '.join(body_parts)}）")
+            if segments:
+                lines.append(f"{user_id} 的记忆" + "，".join(segments))
+        return "\n".join(lines).strip()
 
     async def record_memory_recall_delta(
         self,
@@ -597,7 +573,6 @@ class ContextWindowManager:
         *,
         source_chat_key: str,
         source_message_id: str,
-        recall_text: str = "",
     ) -> tuple[int, int]:
         context_id = str(getattr(window, "context_id", "") or "").strip()
         if not context_id:
@@ -619,17 +594,15 @@ class ContextWindowManager:
                         item = self._normalize_memory_recall_prompt_item(raw_item)
                         if item:
                             candidate_items.append(item)
-                if not candidate_items and str(recall_text or "").strip():
-                    candidate_items = self._extract_memory_recall_prompt_items_from_text(recall_text)
 
                 delta_items: List[Dict[str, str]] = []
                 delta_digests: Set[str] = set()
                 for item in candidate_items:
-                    digest = item["digest"]
-                    if digest in seen or digest in delta_digests:
+                    memory_id = item["memory_id"]
+                    if memory_id in seen or memory_id in delta_digests:
                         continue
                     delta_items.append(item)
-                    delta_digests.add(digest)
+                    delta_digests.add(memory_id)
 
                 if not delta_items:
                     logger.info(f"memory recall delta skipped: ctx={context_id} new_items=0")

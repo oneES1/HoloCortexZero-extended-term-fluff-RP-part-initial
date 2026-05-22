@@ -133,29 +133,35 @@ async def run_agent_v2(
     except Exception:
         pass
 
-    memory_recall_text, memory_recall_meta = await _collect_memory_recall_for_context(
+    memory_recall_text, memory_recall_meta, recall_recomputed = await _collect_memory_recall_for_context(
         ctx=ctx,
         context_window=context_window,
         trigger_user_id=user_id,
     )
     prompt_items = memory_recall_meta.get("prompt_items") if isinstance(memory_recall_meta, dict) else []
-    memory_delta_source_chat_key = str(context_window.active_dialog_id or chat_key or "").strip()
-    memory_delta_source_message_id = (
-        f"memory_recall:{chat_message.message_id}"
-        if chat_message and getattr(chat_message, "message_id", None)
-        else f"memory_recall:{int(time.time())}"
-    )
-    delta_count, delta_context_msg_id = await context_window_manager.record_memory_recall_delta(
-        context_window,
-        prompt_items if isinstance(prompt_items, list) else [],
-        source_chat_key=memory_delta_source_chat_key,
-        source_message_id=memory_delta_source_message_id,
-        recall_text=memory_recall_text,
-    )
-    if delta_count:
+    if recall_recomputed and isinstance(prompt_items, list) and prompt_items:
+        memory_delta_source_chat_key = str(context_window.active_dialog_id or chat_key or "").strip()
+        memory_delta_source_message_id = (
+            f"memory_recall:{chat_message.message_id}"
+            if chat_message and getattr(chat_message, "message_id", None)
+            else f"memory_recall:{int(time.time())}"
+        )
+        delta_count, delta_context_msg_id = await context_window_manager.record_memory_recall_delta(
+            context_window,
+            prompt_items,
+            source_chat_key=memory_delta_source_chat_key,
+            source_message_id=memory_delta_source_message_id,
+        )
+        if delta_count:
+            logger.info(
+                f"run_agent_v2 memory delta injected: ctx={context_window.context_id} "
+                f"chat={memory_delta_source_chat_key} items={delta_count} context_msg_id={delta_context_msg_id}"
+            )
+    elif not recall_recomputed:
         logger.info(
-            f"run_agent_v2 memory delta injected: ctx={context_window.context_id} "
-            f"chat={memory_delta_source_chat_key} items={delta_count} context_msg_id={delta_context_msg_id}"
+            "run_agent_v2 skip memory delta on cached recall round: ctx=%s owner=%s",
+            context_window.context_id,
+            context_window.owner_type,
         )
     stage1_topic_mode = memory_recall_meta.get("topic_mode") if isinstance(memory_recall_meta, dict) else {}
     if isinstance(stage1_topic_mode, dict) and str(stage1_topic_mode.get("mode") or "").upper() == "B":
@@ -679,7 +685,7 @@ async def _collect_memory_recall_for_context(
     ctx: AgentCtx,
     context_window: DBContextWindow,
     trigger_user_id: str,
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, Any], bool]:
     """按上下文类型收集回忆。
 
     主干约束：
@@ -698,7 +704,7 @@ async def _collect_memory_recall_for_context(
             )
         except Exception as e:
             logger.error(f"缓存 auto_memory recall 快照失败: {e}", exc_info=True)
-        return memory_recall_text, memory_recall_meta
+        return memory_recall_text, memory_recall_meta, True
 
     if not _is_normal_context_user_trigger(trigger_user_id):
         memory_recall_text, memory_recall_meta = await _collect_memory_recall(ctx)
@@ -716,7 +722,7 @@ async def _collect_memory_recall_for_context(
             context_window.context_id,
             len(str(memory_recall_text or "")),
         )
-        return memory_recall_text, memory_recall_meta
+        return memory_recall_text, memory_recall_meta, True
 
     refresh_every = max(1, int(getattr(config, "NORMAL_CONTEXT_MEMORY_RECALL_REFRESH_EVERY", 4) or 4))
     cached_recall_text = str(_normal_context_recall_snapshot_by_context.get(context_window.context_id, "") or "").strip()
@@ -737,7 +743,7 @@ async def _collect_memory_recall_for_context(
             refresh_every,
             len(str(memory_recall_text or "")),
         )
-        return memory_recall_text, memory_recall_meta
+        return memory_recall_text, memory_recall_meta, True
 
     trigger_count = int(_normal_context_recall_trigger_count_by_context.get(context_window.context_id, 0) or 0) + 1
     if trigger_count < refresh_every:
@@ -749,7 +755,7 @@ async def _collect_memory_recall_for_context(
             refresh_every,
             len(cached_recall_text),
         )
-        return cached_recall_text, {}
+        return cached_recall_text, {}, False
 
     memory_recall_text, memory_recall_meta = await _collect_memory_recall(ctx)
     _normal_context_recall_snapshot_by_context[context_window.context_id] = str(memory_recall_text or "").strip()
@@ -767,7 +773,7 @@ async def _collect_memory_recall_for_context(
         refresh_every,
         len(str(memory_recall_text or "")),
     )
-    return memory_recall_text, memory_recall_meta
+    return memory_recall_text, memory_recall_meta, True
 
 
 def _get_self_image_system_root() -> Any:

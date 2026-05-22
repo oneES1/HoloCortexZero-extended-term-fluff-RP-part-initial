@@ -1,6 +1,5 @@
 import time
 import json
-import hashlib
 import re
 from typing import Any, Dict, List, Optional
 import asyncio
@@ -197,46 +196,6 @@ def _log_add_memory_final(status: str, *, _ctx: AgentCtx, user_id: str, metadata
         f"user_id={user_id} metadata={_memory_log_metadata(metadata)} "
         f"memory_preview={_memory_log_preview(memory)!r} detail={detail}"
     )
-
-
-def _normalize_memory_prompt_line(text: Any) -> str:
-    line = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    line = re.sub(r"\s+", " ", line)
-    return line.strip()
-
-
-def _extract_memory_prompt_items(memory_context: str) -> List[Dict[str, str]]:
-    prompt_items: List[Dict[str, str]] = []
-    current_group = ""
-
-    for raw_line in str(memory_context or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        line = _normalize_memory_prompt_line(raw_line)
-        if not line:
-            continue
-        if line in {"记忆：", "记忆:"}:
-            continue
-
-        is_header = (
-            line.startswith("【")
-            or line.startswith("Static ")
-            or line.startswith("意图[")
-            or line.startswith("用户:")
-        )
-        if is_header:
-            current_group = line
-            continue
-
-        text = line[2:].strip() if line.startswith("- ") else line
-        if not text:
-            continue
-
-        prompt_items.append({
-            "group": current_group,
-            "text": text,
-            "digest": hashlib.sha1(text.encode("utf-8")).hexdigest(),
-        })
-
-    return prompt_items
 
 
 def _dump_add_memory_log(
@@ -948,6 +907,7 @@ async def inject_memory_prompt(_ctx: AgentCtx) -> str:
 
     # 用于跨多路检索统一去重的 ID 集合
     collected_ids_global = set()
+    prompt_items_for_delta: List[Dict[str, str]] = []
 
     # =========================
     # Phase D: Stage2 并发检索(Static / Social / Self)
@@ -1031,6 +991,38 @@ async def inject_memory_prompt(_ctx: AgentCtx) -> str:
                     prefix += f"(置信度:{confidence}) "
                 lines.append(f"{prefix}{mem}" if prefix else f"{mem}")
         return "\n".join(lines)
+
+    def _build_structured_prompt_item(item: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        if not isinstance(item, dict):
+            return None
+
+        memory_id = _single_line_text(item.get("id"), max_len=128)
+        user_id = _single_line_text(item.get("user_id"), max_len=128)
+        text = _single_line_text(item.get("memory", ""), max_len=2000)
+        if not memory_id or not user_id or not text:
+            return None
+
+        metadata = item.get("metadata", {})
+        confidence = ""
+        if isinstance(metadata, dict):
+            confidence = _single_line_text(
+                metadata.get("CONFIDENCE") or metadata.get("confidence") or "",
+                max_len=32,
+            )
+
+        return {
+            "memory_id": memory_id,
+            "user_id": user_id,
+            "time_text": _format_item_time(item),
+            "text": text,
+            "confidence": confidence,
+        }
+
+    def _append_structured_prompt_items(items: List[Dict[str, Any]]) -> None:
+        for item in items or []:
+            normalized = _build_structured_prompt_item(item)
+            if normalized:
+                prompt_items_for_delta.append(normalized)
 
     def _cap_prompt_items(items: List[Dict[str, Any]], *, limit: int, cap_label: str) -> List[Dict[str, Any]]:
         try:
@@ -1534,6 +1526,7 @@ async def inject_memory_prompt(_ctx: AgentCtx) -> str:
                         collected_ids_global.add(mid)
 
                 if deduped_static:
+                    _append_structured_prompt_items(deduped_static)
                     header =  "全部记忆"
                     full_header = f"Static 画像 {header}({len(deduped_static)} 条)"
                     parts = [full_header]
@@ -1590,6 +1583,7 @@ async def inject_memory_prompt(_ctx: AgentCtx) -> str:
                         collected_ids_global.add(mid)
                 if not deduped:
                     continue
+                _append_structured_prompt_items(deduped)
 
                 reason = str(it.get("reason") or "").strip()
                 title = f"意图[{idx}] target={target_id} query={query}" + (f" | reason={reason}" if reason else "")
@@ -1691,6 +1685,7 @@ async def inject_memory_prompt(_ctx: AgentCtx) -> str:
                             limit=static_prompt_cap,
                             cap_label=f"legacy_static user={uid}",
                         )
+                        _append_structured_prompt_items(static_items)
 
                         for item in static_items:
                             if item.get("id"):
@@ -1799,6 +1794,7 @@ async def inject_memory_prompt(_ctx: AgentCtx) -> str:
                                 limit=dynamic_prompt_cap,
                                 cap_label=f"legacy_dynamic user={uid} query={_single_line_text(query_text, max_len=48)}",
                             )
+                            _append_structured_prompt_items(filtered_results)
                             q = _single_line_text(query_text, max_len=120)
                             title = f"【动态检索】用户 {uid}" + (f" query={q}" if q else "") + f"({len(filtered_results)} 条)"
                             bullets = _format_prompt_bullets(filtered_results, max_items=max_items_per_user_cfg)
@@ -1813,10 +1809,9 @@ async def inject_memory_prompt(_ctx: AgentCtx) -> str:
             if not memory_context.strip():
                 memory_context = ""
 
-    prompt_items = _extract_memory_prompt_items(memory_context)
     try:
         meta = dict(getattr(_ctx, "_na_memory_recall_meta", {}) or {})
-        meta["prompt_items"] = prompt_items
+        meta["prompt_items"] = prompt_items_for_delta
         _ctx._na_memory_recall_meta = meta
     except Exception:
         pass
