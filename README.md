@@ -4,7 +4,7 @@
 
 ## Download links for the Mac/Win client program: (to be added here once ready)
 ## Mac/Win 客户端程序下载地址见：（做好了会在这写）
-
+### BiliBili：
 ## Linux source deployment docs: [English](README_DEPLOY_EN.md) and [中文](README_DEPLOY.md).
 
 HoloCortexZero fluff RP part is a project I built in the spare time during my undergraduate thesis work. It is the starting practice piece of the real HCZ. The first version went online around January 15, 2026, and it has been rapidly iterated and maintained ever since. Its characteristics are:
@@ -530,9 +530,9 @@ LLM 页面就是“模型供应商配置”。新手先不要管所有高级项�
 - 如果访问供应商需要代理，优先打开“启用全局代理”；只有这个 LLM 要特殊代理时，再单独填聊天模型访问代理。
 - 协议发射器新手保持默认；明确知道供应商必须走 `chat`、`responses` 或 `gemini` 时再手动指定。
 
-It is recommended to first create a chat LLM that can reply normally, and then an embedding LLM that can return vectors normally. Memory retrieval strongly depends on the embedding LLM; if it is not configured or the dimensions do not match, long-term memory, emoji matching, and voice-guidance matching will all be affected. The default memory embedding dimension is 1024, and it must match the actual output dimension of the embedding model.
+You **must** have at least one usable LLM, and you must also have at least one embedding model available. Otherwise, the system will deliberately repeat warning text to force you to add the missing configuration. Memory retrieval strongly depends on the embedding LLM; if it is not configured or the dimensions do not match, long-term memory, emoji matching, and voice-guidance matching will all be affected. The default memory embedding dimension is 1024, and it must match the actual output dimension of the embedding model.
 
-建议先建一个能正常回复的聊天 LLM，再建一个能正常返回向量的 embedding LLM。记忆检索强依赖 embedding LLM；不配置或维度不匹配时，长期记忆、表情匹配、语音 guidance 匹配都会受影响。记忆嵌入维度默认 1024，必须和实际 embedding 模型输出维度一致。
+**必须**有至少一个可用LLM，一定要有一个词嵌入模型（否则故意重复发送文字强提醒你增加配置）因为记忆检索强依赖 embedding LLM；不配置或维度不匹配时，长期记忆、表情匹配、语音 guidance 匹配都会受影响。记忆嵌入维度默认 1024，必须和实际 embedding 模型输出维度一致。
 
 If you want full use of memory, automatic interjections, automatic memory, voice, and emojis, the LLM page should at least prepare these model names, which later system settings will reference through dropdowns:
 
