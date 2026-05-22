@@ -219,6 +219,13 @@ class OpenAIChatEmitter(BaseEmitter):
         cache_control = cls._resolve_cache_control(request.cache_hints)
         if not cache_control:
             return
+        if cls._is_deepseek_official_chat_target(base_url=base_url):
+            logger.info(
+                "[openai_chat][cache][deepseek_official] ignored explicit cache transport profile: "
+                f"base_url={base_url} model={request.model} context_id={request.context_id or ''} "
+                f"reason=deepseek_context_cache_is_automatic cache_hints={dict(request.cache_hints)}"
+            )
+            return
         profile = cls._cache_transport_profile(request)
         if profile == "off":
             logger.info(
@@ -233,14 +240,6 @@ class OpenAIChatEmitter(BaseEmitter):
                 "[openai_chat][cache] skipped cache hint application: "
                 f"reason=empty_messages base_url={base_url} model={request.model} "
                 f"context_id={request.context_id or ''}"
-            )
-            return
-
-        if cls._is_deepseek_official_chat_target(base_url=base_url):
-            logger.info(
-                "[openai_chat][cache][deepseek_official] ignored explicit cache transport profile: "
-                f"base_url={base_url} model={request.model} context_id={request.context_id or ''} "
-                f"reason=deepseek_context_cache_is_automatic cache_hints={dict(request.cache_hints)}"
             )
             return
 
@@ -273,14 +272,6 @@ class OpenAIChatEmitter(BaseEmitter):
             logger.info(
                 "[openai_chat][cache] preserved existing top-level cache control: "
                 f"base_url={base_url} model={request.model} context_id={request.context_id or ''}"
-            )
-            return
-
-        if profile == "default" and cls._is_deepseek_official_chat_target(base_url=base_url):
-            logger.info(
-                "[openai_chat][cache][deepseek_official] skipped explicit cache_control: "
-                f"base_url={base_url} model={request.model} context_id={request.context_id or ''} "
-                f"reason=deepseek_context_cache_is_automatic cache_hints={dict(request.cache_hints)}"
             )
             return
 
