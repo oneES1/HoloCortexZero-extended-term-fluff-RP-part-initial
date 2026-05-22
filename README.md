@@ -96,10 +96,11 @@ HCZ 的 payload 主线是“先组装协议无关 IR，再由 router 发射”�
 
 - system：主人格 prompt、参考图路径、框架运行声明；tool 通过原生 function calling 下发，不再把 `<tool_call>` 文本协议塞进 system。
 - 可选用户轮：系统形象参考图，标明这是框架内置参考，不是聊天消息。
+- 环境标注：稳定前置，带当前环境、星期几和时区。
 - 压缩上下文：高级 context 注入 timeline 摘要，普通 context 注入较早历史归档。
-- 历史消息：从 `DBContextMessage` 读出 user/assistant/tool 序列。
-- 回忆与动态指导：长期记忆召回、环境标注、当前时间。
-- 最新用户轮：如果历史最后一条是用户消息，会被挪到整个 payload 末尾，保证模型最后看到的仍是最新触发。
+- 历史消息：从 `DBContextMessage` 读出 user/assistant/tool 序列；`memory_inject` 也作为内部历史自然进入这一段。
+
+主干已删除旧的尾端动态 guidance：长期记忆 recall 不再每轮拼成尾部 `user` 块，环境标注也不再挂在 payload 末尾；如果本轮 recall 命中了此前该 `context_id` 从未注入过的新记忆项，框架只会把这些增量条目写成一条内部 `memory_inject` 历史，后续通过 history 自然带入 payload。
 
 ### Prompt配置、默认身份与运行态覆盖逻辑
 
@@ -137,7 +138,11 @@ tool 链持久化时，assistant 纯文本回复会把隐藏思考写到 meta-on
 
 ## 3.长短期记忆与回忆设计
 
-短期记忆就是当前 `DBContextWindow` 下的 `DBContextMessage` 历史。它不是简单复制某个群或私聊的全量聊天记录，而是由当前 context 的 active dialog 增量同步、去重、水位线、历史裁剪、压缩摘要共同维护。高级 context 默认 100 条历史后触发 timeline 压缩，保留最近 10 条；硬读取上限按 1.2 倍冗余计算，冗余触顶但仍未完成压缩会变成滑动窗口。普通 context 默认 48 条触发归档回收，保留最近 10 条，并把较早历史整理成归档块。
+短期记忆就是当前 `DBContextWindow` 下的 `DBContextMessage` 历史。它不是简单复制某个群或私聊的全量聊天记录，而是由当前 context 的 active dialog 增量同步、去重、水位线、历史裁剪、压缩摘要共同维护。高级 context 默认 100 条聊天消息后触发 timeline 压缩，保留最近 10 条聊天后缀；硬读取上限按 1.2 倍冗余计算，冗余触顶但仍未完成压缩会变成滑动窗口。普通 context 默认 48 条聊天消息触发归档回收，保留最近 10 条聊天后缀，并把较早历史整理成归档块。
+
+`memory_inject` 是主回复 recall 的内部历史化投影，不是永久账本。当前 recall 仍然是源：`services/memory/runtime.py` 先生成 recall 文本与 `prompt_items`，`run_agent_v2.py` 再把“本 context 以前没注入过的新条目”写成 `msg_type="memory_inject"`。这些 `memory_inject` 不参与普通/高级 context 的阈值计数，但它们也不是永久保留：一旦普通归档、高级 summary 应用或高级 hard limit 以聊天消息为口径算出 cutoff，挂靠在 cutoff 之前的 `memory_inject` 会一起清掉。
+
+对应地，`DBContextWindow.memory_recall_seen_items_json` 的语义也不是“这个 context 一生中见过的全部记忆”，而是“当前仍存活在有效上下文窗口里的 `memory_inject` digest 并集”。新增 `memory_inject` 时，账本会增量并入本次 digest；发生 cutoff 清理时，账本会根据数据库里剩余的 `memory_inject` 全量重建；`/clear` 和 `/clearall` 则直接清空账本和相关历史。这样如果旧聊天前缀和旧 `memory_inject` 都被 cutoff 回收，后面再次 recall 到同一条记忆时允许重新注入。
 
 长期记忆使用 Mem0/Qdrant，collection 固定为 `holo_cortex_zero_memory`。`services/memory/mem0_utils.py` 负责 memory client、embedding、memory 管理模型配置；`services/memory/runtime.py` 负责运行时写入、冲突仲裁、召回拼装；写入走后台队列，属于并行异步最终一致，不阻塞主回复链。
 
@@ -161,6 +166,8 @@ tool 链持久化时，assistant 纯文本回复会把隐藏思考写到 meta-on
 
 高级用户上下文会固定注入高级用户静态画像，保证长期 RP 的身份连续性；普通用户上下文优先按当前 `context_id/chat_key` 召回，如果主查询缺失或命中不足，会使用静态 fallback，避免空记忆导致回复突然失去背景。
 
+普通 context 的 recall 刷新频率和注入频率也刻意解耦：`NORMAL_CONTEXT_MEMORY_RECALL_REFRESH_EVERY` 默认 4，表示普通用户每累计 4 次真实用户触发才重算一次 Stage1/Stage2 recall；其余轮次可复用缓存 recall 文本。但 `memory_inject` 只会在那次真实重算里拿到新的 `prompt_items` 时做增量判定，命中缓存的轮次不会重复生成新的 `memory_inject`。
+
 ### 自动记忆 auto_memory
 
 自动记忆由 `services/memory/auto_memory.py` 后台运行，是“静默审阅上下文并决定是否写长期记忆”的辅助链，不直接参与主回复。启动时会自补 `DBContextWindow` 上的 `auto_memory_last_context_msg_id`、`auto_memory_pending_count`、`auto_memory_generating` 三列，并在恢复阶段重新计算 pending、清掉遗留 generating 锁，避免重启后卡死。
@@ -183,7 +190,7 @@ auto_memory 会通过 `dump_memory_json("auto_memory", "request/response/tool_ca
 - `stable_prefix=system_first_text`
 - `cache_domain=main:{owner_type}:{mode}` 这一类调用方传入的域信息
 
-router 会把结构化请求切成 canonical units，计算稳定前缀 LCP，并维护最多 128 个 prefix snapshot。这样同一 context 的 system/persona/摘要/历史稳定部分可以尽量命中缓存，而最新用户输入仍保持在 payload 末尾。不同供应商的差异被限制在 emitter：Responses 可映射 `cache_control`，chat 可按 cache profile 映射 `cache_control` 或 `prompt_cache_key`，uni-grok 可用 `prompt_cache_key` 兼容，deepseek/local 等按各自能力跳过或调整字段。
+router 会把结构化请求切成 canonical units，计算稳定前缀 LCP，并维护最多 128 个 prefix snapshot。这样同一 context 的 system/persona/环境前置块/摘要/历史稳定部分可以尽量命中缓存，而长期记忆不再以每轮尾端动态 guidance 的形式持续漂移；记忆改成 `memory_inject` 后，只有真正新增的 recall 条目才会进入历史。不同供应商的差异被限制在 emitter：Responses 可映射 `cache_control`，chat 可按 cache profile 映射 `cache_control` 或 `prompt_cache_key`，uni-grok 可用 `prompt_cache_key` 兼容，deepseek/local 等按各自能力跳过或调整字段。
 
 ### 图片降级与缓存关系
 
