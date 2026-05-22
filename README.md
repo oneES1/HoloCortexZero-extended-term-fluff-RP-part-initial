@@ -2,7 +2,10 @@
 
 # 2026.5.22 Context structure update: the cache hit rate exceeds 98% at 8K context. This is a general update; explicit DeepSeek user_id cache isolation was also added to improve stability
 
-# 2026.5.22 更新context结构，8K上下文时缓存率达到98%以上，是通用更新；顺便增加deepseek user_id 显式缓存隔离提高稳定性
+## Download links for the Mac/Win client program: (to be added here once ready)
+## Mac/Win 客户端程序下载地址见：（做好了会在这写）
+
+## Linux source deployment docs: [English](README_DEPLOY_EN.md) and [中文](README_DEPLOY.md).
 
 HoloCortexZero fluff RP part is a project I built in the spare time during my undergraduate thesis work. It is the starting practice piece of the real HCZ. The first version went online around January 15, 2026, and it has been rapidly iterated and maintained ever since. Its characteristics are:
 
@@ -59,14 +62,6 @@ Basic philosophy: (not involving concrete design)
 - 6.记忆系统多结构需求**针对性优化**不能通用糊弄
 - 7.test time **skill分层快与慢学习与应用**避免token/推理资源浪费，同时固化长期skill习惯，skill相关排布由专门负责，仍然禁止过度污染其他智能体，严格隔离分工
 - 8.联想与记忆的注入非常重要，但具体落实时具体务实分析
-
-## Download links for the Mac/Win client program: (to be added here once ready)
-
-## Mac/Win 客户端程序下载地址见：（做好了会在这写）
-
-## Linux source deployment docs: [English](README_DEPLOY_EN.md) and [中文](README_DEPLOY.md).
-
-## Linux源码部署文档：[中文](README_DEPLOY.md) and [English](README_DEPLOY_EN.md).
 
 # Table of Contents / 目录
 
