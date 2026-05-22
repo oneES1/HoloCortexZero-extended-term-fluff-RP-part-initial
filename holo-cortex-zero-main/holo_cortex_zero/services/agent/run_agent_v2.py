@@ -150,6 +150,7 @@ async def run_agent_v2(
         prompt_items if isinstance(prompt_items, list) else [],
         source_chat_key=memory_delta_source_chat_key,
         source_message_id=memory_delta_source_message_id,
+        recall_text=memory_recall_text,
     )
     if delta_count:
         logger.info(

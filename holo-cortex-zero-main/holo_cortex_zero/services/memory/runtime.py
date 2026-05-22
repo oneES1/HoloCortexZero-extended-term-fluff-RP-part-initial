@@ -213,6 +213,8 @@ def _extract_memory_prompt_items(memory_context: str) -> List[Dict[str, str]]:
         line = _normalize_memory_prompt_line(raw_line)
         if not line:
             continue
+        if line in {"记忆：", "记忆:"}:
+            continue
 
         is_header = (
             line.startswith("【")
@@ -228,11 +230,10 @@ def _extract_memory_prompt_items(memory_context: str) -> List[Dict[str, str]]:
         if not text:
             continue
 
-        digest_source = f"{current_group}\n{text}" if current_group else text
         prompt_items.append({
             "group": current_group,
             "text": text,
-            "digest": hashlib.sha1(digest_source.encode("utf-8")).hexdigest(),
+            "digest": hashlib.sha1(text.encode("utf-8")).hexdigest(),
         })
 
     return prompt_items

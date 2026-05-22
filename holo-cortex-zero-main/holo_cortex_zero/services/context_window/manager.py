@@ -432,10 +432,7 @@ class ContextWindowManager:
         text = cls._normalize_memory_recall_text(item.get("text"))
         if not text:
             return None
-        digest = cls._normalize_memory_recall_text(item.get("digest"))
-        if not digest:
-            digest_source = f"{group}\n{text}" if group else text
-            digest = hashlib.sha1(digest_source.encode("utf-8")).hexdigest()
+        digest = hashlib.sha1(text.encode("utf-8")).hexdigest()
         return {
             "group": group,
             "text": text,
@@ -464,39 +461,45 @@ class ContextWindowManager:
         return json.dumps(normalized, ensure_ascii=False)
 
     @classmethod
-    def _extract_memory_recall_digests_from_text(cls, text: str) -> Set[str]:
-        digests: Set[str] = set()
+    def _extract_memory_recall_prompt_items_from_text(cls, text: str) -> List[Dict[str, str]]:
+        items: List[Dict[str, str]] = []
         current_group = ""
         for raw_line in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
             line = cls._normalize_memory_recall_text(raw_line)
-            if not line or line == "记忆：":
+            if not line or line in {"记忆：", "记忆:"}:
                 continue
-            if line.startswith("- "):
-                item_text = cls._normalize_memory_recall_text(line[2:])
-                if not item_text:
-                    continue
-                digest_source = f"{current_group}\n{item_text}" if current_group else item_text
-                digests.add(hashlib.sha1(digest_source.encode("utf-8")).hexdigest())
+
+            is_header = (
+                line.startswith("【")
+                or line.startswith("Static ")
+                or line.startswith("意图[")
+                or line.startswith("用户:")
+            )
+            if is_header:
+                current_group = line
                 continue
-            current_group = line
-        return digests
+
+            item_text = cls._normalize_memory_recall_text(line[2:] if line.startswith("- ") else line)
+            if not item_text:
+                continue
+
+            items.append({
+                "group": current_group,
+                "text": item_text,
+                "digest": hashlib.sha1(item_text.encode("utf-8")).hexdigest(),
+            })
+        return items
+
+    @classmethod
+    def _extract_memory_recall_digests_from_text(cls, text: str) -> Set[str]:
+        return {
+            str(item.get("digest") or "").strip()
+            for item in cls._extract_memory_recall_prompt_items_from_text(text)
+            if str(item.get("digest") or "").strip()
+        }
 
     @classmethod
     def _extract_memory_recall_digests_from_db_msg(cls, db_msg: Any) -> Set[str]:
-        raw = str(getattr(db_msg, "memory_digests_json", "") or "[]").strip() or "[]"
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            parsed = None
-        if isinstance(parsed, list):
-            digests = {
-                cls._normalize_memory_recall_text(item)
-                for item in parsed
-                if cls._normalize_memory_recall_text(item)
-            }
-            if digests:
-                return digests
-
         texts: List[str] = []
         for part in cls._parse_parts_json(getattr(db_msg, "parts_json", "[]") or "[]"):
             if str(getattr(part, "type", "") or "") != "text":
@@ -504,7 +507,22 @@ class ContextWindowManager:
             text = str(getattr(part, "text", "") or "").strip()
             if text:
                 texts.append(text)
-        return cls._extract_memory_recall_digests_from_text("\n".join(texts))
+        digests_from_text = cls._extract_memory_recall_digests_from_text("\n".join(texts))
+        if digests_from_text:
+            return digests_from_text
+
+        raw = str(getattr(db_msg, "memory_digests_json", "") or "[]").strip() or "[]"
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            return {
+                cls._normalize_memory_recall_text(item)
+                for item in parsed
+                if cls._normalize_memory_recall_text(item)
+            }
+        return set()
 
     async def _rebuild_memory_recall_seen_items_json(
         self,
@@ -565,17 +583,12 @@ class ContextWindowManager:
     @classmethod
     def _render_memory_recall_delta_text(cls, items: List[Dict[str, str]]) -> str:
         lines: List[str] = ["记忆："]
-        current_group = ""
         for item in items:
-            group = cls._normalize_memory_recall_text(item.get("group"))
             text = cls._normalize_memory_recall_text(item.get("text"))
             if not text:
                 continue
-            if group and group != current_group:
-                lines.append(group)
-                current_group = group
             lines.append(f"- {text}")
-        return "\n".join(lines).strip()
+        return "\n".join(lines).strip() if len(lines) > 1 else ""
 
     async def record_memory_recall_delta(
         self,
@@ -584,38 +597,45 @@ class ContextWindowManager:
         *,
         source_chat_key: str,
         source_message_id: str,
+        recall_text: str = "",
     ) -> tuple[int, int]:
         context_id = str(getattr(window, "context_id", "") or "").strip()
-        if not context_id or not isinstance(prompt_items, list):
-            return 0, 0
-
-        seen = self._load_memory_recall_seen_items(window)
-        delta_items: List[Dict[str, str]] = []
-        delta_digests: Set[str] = set()
-
-        for raw_item in prompt_items:
-            item = self._normalize_memory_recall_prompt_item(raw_item)
-            if not item:
-                continue
-            digest = item["digest"]
-            if digest in seen or digest in delta_digests:
-                continue
-            delta_items.append(item)
-            delta_digests.add(digest)
-
-        if not delta_items:
-            logger.info(f"memory recall delta skipped: ctx={context_id} new_items=0")
-            return 0, 0
-
-        rendered_text = self._render_memory_recall_delta_text(delta_items)
-        if not rendered_text:
-            logger.warning(f"memory recall delta render empty: ctx={context_id} new_items={len(delta_items)}")
+        if not context_id:
             return 0, 0
 
         created_id = 0
         memory_anchor_context_msg_id = 0
         try:
             async with in_transaction() as conn:
+                db_window = await DBContextWindow.get(context_id=context_id).using_db(conn)
+                seen = self._load_memory_recall_seen_items(db_window)
+                candidate_items: List[Dict[str, str]] = []
+                if isinstance(prompt_items, list):
+                    for raw_item in prompt_items:
+                        item = self._normalize_memory_recall_prompt_item(raw_item)
+                        if item:
+                            candidate_items.append(item)
+                if not candidate_items and str(recall_text or "").strip():
+                    candidate_items = self._extract_memory_recall_prompt_items_from_text(recall_text)
+
+                delta_items: List[Dict[str, str]] = []
+                delta_digests: Set[str] = set()
+                for item in candidate_items:
+                    digest = item["digest"]
+                    if digest in seen or digest in delta_digests:
+                        continue
+                    delta_items.append(item)
+                    delta_digests.add(digest)
+
+                if not delta_items:
+                    logger.info(f"memory recall delta skipped: ctx={context_id} new_items=0")
+                    return 0, 0
+
+                rendered_text = self._render_memory_recall_delta_text(delta_items)
+                if not rendered_text:
+                    logger.warning(f"memory recall delta render empty: ctx={context_id} new_items={len(delta_items)}")
+                    return 0, 0
+
                 memory_anchor_context_msg_id = await self._get_latest_countable_chat_context_msg_id(
                     context_id,
                     using_db=conn,
@@ -635,14 +655,13 @@ class ContextWindowManager:
                 )
                 created_id = int(getattr(created, "id", 0) or 0)
 
-                db_window = await DBContextWindow.get(context_id=context_id).using_db(conn)
                 updated_seen = self._load_memory_recall_seen_items(db_window)
                 updated_seen.update(delta_digests)
                 db_window.memory_recall_seen_items_json = self._dump_memory_recall_seen_items(updated_seen)
                 await db_window.save(using_db=conn, update_fields=["memory_recall_seen_items_json", "updated_at"])
                 window.memory_recall_seen_items_json = db_window.memory_recall_seen_items_json
 
-            self._windows[context_id] = window
+            self._windows[context_id] = db_window
             await self.enforce_history_hard_limit(context_id)
             logger.info(
                 f"memory recall delta recorded: ctx={context_id} new_items={len(delta_items)} "
