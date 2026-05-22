@@ -60,6 +60,7 @@
       "textLength": "文本长度 {{count}}",
       "tokenUsage": "Token {{prompt}}/{{completion}}/{{total}}",
       "cacheUsage": "缓存 {{cached}} · {{ratio}}",
+      "rawUsage": "网关 Usage 原文",
       "arguments": "调用参数",
       "resultPreview": "结果摘要",
       "reasoningContent": "思维链",

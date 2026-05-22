@@ -72,6 +72,10 @@ const extractReasoningContent = (value: unknown) => {
   return raw
 }
 
+const hasRawUsage = (value: unknown): value is Record<string, unknown> => {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0)
+}
+
 const getTraceEventTitle = (
   event: ToolTraceChainEvent,
   t: (key: string, options?: Record<string, unknown>) => string
@@ -151,6 +155,7 @@ export function TimelineEventCard({
   const { t } = useTranslation('tool-traces')
   const theme = useTheme()
   const reasoningContent = extractReasoningContent(event.reasoning_content)
+  const rawUsage = hasRawUsage(event.usage?.raw_usage) ? event.usage.raw_usage : null
   const kindColor = EVENT_KIND_COLORS[event.kind]
   const isError = event.kind === 'error' || (event.kind === 'tool' && event.is_error)
 
@@ -269,6 +274,25 @@ export function TimelineEventCard({
                 <Typography sx={bodyTextSx}>
                   {reasoningContent || t('detail.trace.noReasoningContent')}
                 </Typography>
+              </Box>
+            </Box>
+          )}
+
+          {event.kind === 'llm' && rawUsage && (
+            <Box sx={{ mt: 1.5 }}>
+              <Typography sx={{ ...sectionLabelSx, mb: 0.75 }}>
+                {t('detail.trace.rawUsage')}
+              </Typography>
+              <Box sx={scrollableBlockSx}>
+                <SyntaxHighlighter
+                  language="json"
+                  style={theme.palette.mode === 'dark' ? vscDarkPlus : oneLight}
+                  customStyle={{ margin: 0, background: 'transparent' }}
+                  wrapLines
+                  wrapLongLines
+                >
+                  {stringifyTraceValue(rawUsage)}
+                </SyntaxHighlighter>
               </Box>
             </Box>
           )}

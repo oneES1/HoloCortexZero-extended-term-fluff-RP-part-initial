@@ -60,6 +60,7 @@
       "textLength": "Text length {{count}}",
       "tokenUsage": "Tokens {{prompt}}/{{completion}}/{{total}}",
       "cacheUsage": "Cache {{cached}} · {{ratio}}",
+      "rawUsage": "Gateway Usage",
       "arguments": "Arguments",
       "resultPreview": "Result Preview",
       "reasoningContent": "Reasoning Content",

@@ -73,46 +73,94 @@ class ToolChainExecutor:
         return str(fallback_model or "").strip()
 
     @staticmethod
-    def _extract_usage_metrics(usage: Optional[Dict[str, Any]]) -> Dict[str, int]:
+    def _iter_usage_dicts(usage: Dict[str, Any]) -> List[Dict[str, Any]]:
+        seen: set[int] = set()
+        ordered: List[Dict[str, Any]] = []
+
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                node_id = id(node)
+                if node_id in seen:
+                    return
+                seen.add(node_id)
+                ordered.append(node)
+                for value in node.values():
+                    walk(value)
+                return
+            if isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(usage)
+        return ordered
+
+    @classmethod
+    def _pick_usage_int(cls, usage: Dict[str, Any], *keys: str) -> int:
+        fallback_zero = 0
+        for node in cls._iter_usage_dicts(usage):
+            for key in keys:
+                value = node.get(key)
+                if isinstance(value, (int, float)):
+                    normalized = int(value)
+                    if normalized > 0:
+                        return normalized
+                    fallback_zero = normalized
+        return fallback_zero
+
+    @staticmethod
+    def _coerce_trace_json_value(value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {str(key): ToolChainExecutor._coerce_trace_json_value(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [ToolChainExecutor._coerce_trace_json_value(item) for item in value]
+        return str(value)
+
+    @classmethod
+    def _extract_usage_metrics(cls, usage: Optional[Dict[str, Any]]) -> Dict[str, int]:
         if not isinstance(usage, dict):
             return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cached_tokens": 0}
 
-        usage_metadata = usage.get("usageMetadata")
-        nested_usage = usage_metadata if isinstance(usage_metadata, dict) else usage
-
-        def pick_int(*keys: str) -> int:
-            for key in keys:
-                value = nested_usage.get(key)
-                if isinstance(value, (int, float)):
-                    return int(value)
-            return 0
-
-        prompt_tokens = pick_int("prompt_tokens", "input_tokens", "promptTokenCount", "inputTokenCount")
-        prompt_cache_hit_tokens = pick_int("prompt_cache_hit_tokens", "promptCacheHitTokens")
-        prompt_cache_miss_tokens = pick_int("prompt_cache_miss_tokens", "promptCacheMissTokens")
-        prompt_details = nested_usage.get("prompt_tokens_details")
-        input_details = nested_usage.get("input_tokens_details")
-        cached_tokens = 0
-        for details in (prompt_details, input_details):
-            if not isinstance(details, dict):
-                continue
-            value = details.get("cached_tokens")
-            if not isinstance(value, (int, float)):
-                value = details.get("cachedTokens")
-            if isinstance(value, (int, float)):
-                cached_tokens = int(value)
-                break
-        if cached_tokens <= 0 and prompt_cache_hit_tokens > 0:
-            cached_tokens = prompt_cache_hit_tokens
+        prompt_tokens = cls._pick_usage_int(
+            usage,
+            "prompt_tokens",
+            "input_tokens",
+            "promptTokenCount",
+            "inputTokenCount",
+        )
+        prompt_cache_hit_tokens = cls._pick_usage_int(
+            usage,
+            "prompt_cache_hit_tokens",
+            "promptCacheHitTokens",
+        )
+        prompt_cache_miss_tokens = cls._pick_usage_int(
+            usage,
+            "prompt_cache_miss_tokens",
+            "promptCacheMissTokens",
+        )
+        cached_tokens = cls._pick_usage_int(
+            usage,
+            "cached_tokens",
+            "cachedTokens",
+            "prompt_cache_hit_tokens",
+            "promptCacheHitTokens",
+            "cache_read_input_tokens",
+            "cacheReadInputTokens",
+            "input_cached_tokens",
+            "inputCachedTokens",
+            "cachedContentTokenCount",
+        )
         if prompt_tokens <= 0 and (prompt_cache_hit_tokens > 0 or prompt_cache_miss_tokens > 0):
             prompt_tokens = prompt_cache_hit_tokens + prompt_cache_miss_tokens
-        completion_tokens = pick_int(
+        completion_tokens = cls._pick_usage_int(
+            usage,
             "completion_tokens",
             "output_tokens",
             "candidatesTokenCount",
             "outputTokenCount",
         )
-        total_tokens = pick_int("total_tokens", "totalTokenCount")
+        total_tokens = cls._pick_usage_int(usage, "total_tokens", "totalTokenCount")
         if total_tokens <= 0:
             total_tokens = prompt_tokens + completion_tokens
 
@@ -122,6 +170,13 @@ class ToolChainExecutor:
             "total_tokens": total_tokens,
             "cached_tokens": cached_tokens,
         }
+
+    @classmethod
+    def _build_trace_usage(cls, usage: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        metrics: Dict[str, Any] = cls._extract_usage_metrics(usage)
+        if isinstance(usage, dict):
+            metrics["raw_usage"] = cls._coerce_trace_json_value(usage)
+        return metrics
 
     @staticmethod
     def _truncate_text(text: Any, limit: int = 12000) -> str:
@@ -538,7 +593,7 @@ class ToolChainExecutor:
                 llm_duration_ms = int((time.time() - llm_call_started_at) * 1000)
                 llm_duration_ms_total += llm_duration_ms
                 current_model = self._extract_model_name(result, request.model)
-                usage_metrics = self._extract_usage_metrics(result.usage)
+                usage_metrics = self._build_trace_usage(result.usage)
                 token_prompt_total += usage_metrics["prompt_tokens"]
                 token_completion_total += usage_metrics["completion_tokens"]
                 token_total += usage_metrics["total_tokens"]

@@ -5,6 +5,7 @@ export interface ToolTraceUsage {
   completion_tokens: number
   total_tokens: number
   cached_tokens?: number
+  raw_usage?: Record<string, unknown>
 }
 
 export interface ToolTraceChainRound {
