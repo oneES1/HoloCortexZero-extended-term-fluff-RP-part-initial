@@ -608,7 +608,11 @@ class ContextWindowManager:
         try:
             async with in_transaction() as conn:
                 db_window = await DBContextWindow.get(context_id=context_id).using_db(conn)
+                # cutoff may already rebuild seen on a newer DB window before this call;
+                # sync caller state from DB first, then decide delta from the DB ledger.
+                window.memory_recall_seen_items_json = db_window.memory_recall_seen_items_json
                 seen = self._load_memory_recall_seen_items(db_window)
+                self._windows[context_id] = db_window
                 candidate_items: List[Dict[str, str]] = []
                 if isinstance(prompt_items, list):
                     for raw_item in prompt_items:
@@ -655,7 +659,7 @@ class ContextWindowManager:
                 )
                 created_id = int(getattr(created, "id", 0) or 0)
 
-                updated_seen = self._load_memory_recall_seen_items(db_window)
+                updated_seen = set(seen)
                 updated_seen.update(delta_digests)
                 db_window.memory_recall_seen_items_json = self._dump_memory_recall_seen_items(updated_seen)
                 await db_window.save(using_db=conn, update_fields=["memory_recall_seen_items_json", "updated_at"])
