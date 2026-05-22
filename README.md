@@ -34,8 +34,10 @@ HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是
 ## Mac/Win 客户端程序下载地址见：（做好了会在这写）
 ## Linux源码部署文档：[中文](README_DEPLOY.md) and [English](README_DEPLOY_EN.md).
 
+# 5.22 增加deepseek user_id 显式缓存隔离，修复打断缓存的设计
+
 # 目录
-0.RP part宗旨：
+- 0.RP part宗旨：
 本框架提供了tool支持，但强烈不建议用RP框架干活，工作与陪伴RP混杂体验不会好，这是一件难度远大于表面的事。必须做事请开发**单个极简tool**召唤subagent或代码逻辑做，保持RP上下文不被琐事和工作情绪污染，刻意不添加skill，MCP等强污染心智内容。时机成熟会在未来阶段4打造RP与干活融合
 
 - 1.用户，频道context管理综述

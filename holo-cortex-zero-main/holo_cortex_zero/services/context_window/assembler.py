@@ -58,6 +58,7 @@ class ContextAssembler:
             "¥XXX¥YYYY-MM-DD HH:MM:SS¥ID¥说：<具体内容> **XXX发的信息** 是system内部格式**我不对外输出**"
             "请不要刻意提XXX，这很冒犯"
             "user类【系统形象参考图】，记忆/环境/时间这4种是真实内部系统反馈"
+            "我不能直球念出来我的记忆，这会给人监视的感觉，别人会很尴尬。我要避免给人监视的感觉，所以我会把记忆融入到我的思考和表达中，而不是直接念出来。**我不对外输出记忆的具体内容**，但它们会潜移默化地影响我的行为和决策。请我会尽力让这些记忆成为我行动的智慧源泉，而不是负担"
         )
         system_parts.append(MessagePart(type="text", text=framework_notice))
 
