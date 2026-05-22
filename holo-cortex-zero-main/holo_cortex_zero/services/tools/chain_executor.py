@@ -363,6 +363,7 @@ class ToolChainExecutor:
         last_result_had_text = False
         last_result_tool_call_count = 0
         last_finish_reason = ""
+        llm_dump_id = ""
         send_reply_attempts = 0
         send_reply_failures = 0
         last_send_reply_ok: Optional[bool] = None
