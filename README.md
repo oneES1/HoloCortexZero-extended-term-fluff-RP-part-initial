@@ -9,8 +9,6 @@
 
 HoloCortexZero fluff RP part is a project I built in the spare time during my undergraduate thesis work. It is the starting practice piece of the real HCZ. The first version went online around January 15, 2026, and it has been rapidly iterated and maintained ever since. Its characteristics are:
 
-HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是真正HCZ的起步练习作。从26年1月15号左右上线第一版，快速迭代和维护，特点是：
-
 - 1. With only 18K context, it has already been engineering-validated to achieve more than 4 months of **seamless, imperceptible long-term memory**. Internal test users reported results beyond expectations.
 - 2. Context remains coherent even when **multiple human users span multiple group chats and platforms**; there is no need to worry about concurrency conflicts between multiple groups and private chats, or about the bot forgetting what was just said in a private conversation on another messaging platform.
 - 3. It supports reasoning-chain replay and multiple caching protocols; the average cache hit rate is 95%, and protocols can be switched at any time: Gemini protocol full multimodal support (images, voice, video), DeepSeek-v4 toolcall (reasoning replay must be enabled), Responses, chat, and other emitter protocols.
@@ -27,32 +25,13 @@ HoloCortexZero fluff RP part 是我在本科毕设空闲时间做的项目，是
 
 ## The ultimate goal of HoloCortexZero is a long-range general system, measured in years, built on sequence models (at the current mainstream LLM stage) and described through an agentic framework, capable of autonomously discovering innovation, autonomously producing concrete outputs, and autonomously planning social interaction, in a total of four stages
 
-## HoloCortexZero最终目的在以年为单位长程通用的，可自主发现创新，自主产出落地，自主社交规划的基于序列模型搭建的（当前LLM主流阶段）以agentic框架叙述，共4个阶段
-
 The first two stages are: 1. a companion-style RP framework as a starting practice exercise (completed); 2. building a general metacognitive agentic framework for short-term 24-hour tasks, and significantly surpassing existing approaches in thinking, reasoning, and research benchmarks (about to begin).
-
-前2阶段：1.陪伴型RP框架，起步练手（已完成） 2.打造24小时短期任务的通用思考元认知agentic框架并显著在思考，推理，研究性benchmark超过现有方案（即将执行）
 
 # HoloCortexZero-Metacognition-part-Prose (Stage 2 not yet implemented)
 
-# HoloCortexZero-Metacognition-part-Prose（还未实施的阶段2）
-
 There is not yet a mature solution that I would dare claim is the best. The plan is still under exploration, deliberation, and research. At the moment, I am considering first building enough symbolic tools and then developing further from there.
 
-并没有成熟敢宣称最好的方案，方案仍在探索斟酌和调研。目前正在考虑先创建够用的符号工具再后续开发
-
-Basic philosophy: (not involving concrete design)
-
 基本哲学：（不涉及具体设计）
-
-- 1. **Division of labor must be isolated**. Inputs and outputs must be explicit. Thinking and execution, or different tasks, must not share the same context; isolation makes the system predictable.
-- 2. Asking after essence is very important. Asking after the essence of the current task serves planning; asking after one's own essence serves the LLM group that updates skills; asking after the essence of meaning serves autonomous direction-finding.
-- 3. Synchronous background segmented review should run in parallel for most agents to **audit hallucinations and fabrication**. Hallucinations should not be discarded directly; instead, they should be handed to the background association part for parallel processing and storage as preparation. Segments that fail review should be rolled back or searched and summarized through concurrent derivations.
-- 4. Beyond shared "boards", there must be global supervision and course correction. Even the coordinator should receive supervision and correction, reviewing from the essential and root needs to **prevent drift or narrowing**. Depending on circumstances, an instant-correction model with small local TTFT may also be added.
-- 5. The overall test-time scale should be conservative, but the parallel scale should be large and boldly so. Each controllable node should be pushed forward only after passing review closer to the **global optimum**, with minimal rework and no gut-feel decisions; the review knows weak points and hidden conditions, and the review itself is also suppressed by global correction to restrain local hallucinations. But when rework is truly needed, do not be conservative.
-- 6. The memory system needs **targeted optimization** for multiple structures; do not paper over it with fake generality.
-- 7. At test time, **skills should be layered into fast and slow learning and application** to avoid wasting tokens and reasoning resources, while also solidifying long-term skill habits. Skill-related arrangement should be handled by dedicated components, and over-polluting other agents is still prohibited; division of labor must remain strictly isolated.
-- 8. The injection of association and memory is extremely important, but implementation still requires concrete and pragmatic analysis.
 
 - 1.**必须隔离分工**必须保证输入输出明确，不能同一上下文有思考与执行或不同任务，隔离，可预测
 - 2.追问本质很重要，对本次任务追问本质是为规划服务，对自己追问本质是给更新skill的LLM群服务，对意义追问本质是自主找方向
