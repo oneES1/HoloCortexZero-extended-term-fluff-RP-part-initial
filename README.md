@@ -71,8 +71,6 @@ Basic philosophy: (not involving concrete design)
 # Table of Contents / 目录
 
 - 0. Purpose of the RP Part / 0.RP part宗旨：
-This framework provides tool support, but I strongly do not recommend using an RP framework to do work. Mixing work with companion RP leads to a bad experience, and this is much harder than it looks on the surface. If work truly must be done, please develop **a single minimal tool** to call a subagent or code logic, keeping the RP context free from clutter and work emotions, and deliberately not adding heavily mind-polluting things such as skills or MCP. When the time is right, Stage 4 will integrate RP and work.
-本框架提供了tool支持，但强烈不建议用RP框架干活，工作与陪伴RP混杂体验不会好，这是一件难度远大于表面的事。必须做事请开发**单个极简tool**召唤subagent或代码逻辑做，保持RP上下文不被琐事和工作情绪污染，刻意不添加skill，MCP等强污染心智内容。时机成熟会在未来阶段4打造RP与干活融合
 
 - 1. Overview of User, Channel, and Context Management / 1.用户，频道context管理综述
 - 2. Payload Assembly, Prompt Configuration, Degradation, and Routing Design / 2.payload组装，Prompt配置，降级，处理路由设计
