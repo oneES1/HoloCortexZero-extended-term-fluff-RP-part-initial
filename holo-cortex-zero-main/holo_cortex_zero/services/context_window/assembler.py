@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, List
 
 from holo_cortex_zero.core.config import config
 from holo_cortex_zero.core.logger import logger
@@ -122,12 +122,7 @@ class ContextAssembler:
         # === 历史消息序列 ===
         history = await context_window_manager.get_history(context_window.context_id)
 
-        latest_user_turn: Optional[MessageTurn] = None
-        if history and history[-1].role == "user" and history[-1].parts:
-            latest_user_turn = history[-1]
-            messages.extend(history[:-1])
-        else:
-            messages.extend(history)
+        messages.extend(history)
 
         # === USER: 回忆与动态指导 ===
         guidance_parts: List[MessagePart] = []
@@ -143,8 +138,6 @@ class ContextAssembler:
         ))
 
         messages.append(MessageTurn(role="user", parts=guidance_parts))
-        if latest_user_turn is not None:
-            messages.append(latest_user_turn)
 
         cache_hints = {
             "cache_control": "ephemeral",
