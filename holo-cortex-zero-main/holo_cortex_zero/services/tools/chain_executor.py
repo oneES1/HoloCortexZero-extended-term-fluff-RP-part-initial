@@ -88,6 +88,8 @@ class ToolChainExecutor:
             return 0
 
         prompt_tokens = pick_int("prompt_tokens", "input_tokens", "promptTokenCount", "inputTokenCount")
+        prompt_cache_hit_tokens = pick_int("prompt_cache_hit_tokens", "promptCacheHitTokens")
+        prompt_cache_miss_tokens = pick_int("prompt_cache_miss_tokens", "promptCacheMissTokens")
         prompt_details = nested_usage.get("prompt_tokens_details")
         input_details = nested_usage.get("input_tokens_details")
         cached_tokens = 0
@@ -100,6 +102,10 @@ class ToolChainExecutor:
             if isinstance(value, (int, float)):
                 cached_tokens = int(value)
                 break
+        if cached_tokens <= 0 and prompt_cache_hit_tokens > 0:
+            cached_tokens = prompt_cache_hit_tokens
+        if prompt_tokens <= 0 and (prompt_cache_hit_tokens > 0 or prompt_cache_miss_tokens > 0):
+            prompt_tokens = prompt_cache_hit_tokens + prompt_cache_miss_tokens
         completion_tokens = pick_int(
             "completion_tokens",
             "output_tokens",

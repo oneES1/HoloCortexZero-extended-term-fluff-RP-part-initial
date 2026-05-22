@@ -51,6 +51,12 @@ CHAT_TRANSPORT_CONTROL_KEYS = {
 CHAT_GENERIC_CACHE_CONTROL = {"type": "ephemeral"}
 CHAT_CONTENT_CACHE_COMPAT_HOSTS = set(UNIAPI_HOSTS)
 DEEPSEEK_OFFICIAL_CHAT_HOSTS = {"api.deepseek.com"}
+DEEPSEEK_OFFICIAL_CACHE_TRANSPORT_FIELD_KEYS = (
+    "cache_control",
+    "prompt_cache_key",
+    "prompt_cache_retention",
+    "cache_prompt",
+)
 CHAT_INTERNAL_REASONING_CONTENT_KEY = "__hcz_reasoning_content"
 CHAT_REPLAY_REASONING_CONTENT_KEY = "replay_reasoning_content"
 LOCAL_CHAT_IMAGE_MAX_LONG_EDGE_EXTRA_KEY = "local_chat_image_max_long_edge"
@@ -171,6 +177,23 @@ class OpenAIChatEmitter(BaseEmitter):
             "model": str(request.model or ""),
         })[:32]
 
+    @classmethod
+    def _build_deepseek_official_cache_partition_user_id(
+        cls,
+        request: GenerationRequest,
+        *,
+        base_url: str,
+    ) -> str:
+        host, _ = cls._parse_base_url(base_url)
+        cache_domain = str((request.cache_hints or {}).get("cache_domain") or "").strip()
+        context_id = str(request.context_id or "").strip() or "global"
+        return "hcz-ds-" + cls._hash_json({
+            "host": host,
+            "model": str(request.model or "").strip(),
+            "context_id": context_id,
+            "cache_domain": cache_domain,
+        })[:40]
+
     @staticmethod
     def _message_has_cache_control(message: Dict[str, Any]) -> bool:
         content = message.get("content")
@@ -210,6 +233,14 @@ class OpenAIChatEmitter(BaseEmitter):
                 "[openai_chat][cache] skipped cache hint application: "
                 f"reason=empty_messages base_url={base_url} model={request.model} "
                 f"context_id={request.context_id or ''}"
+            )
+            return
+
+        if cls._is_deepseek_official_chat_target(base_url=base_url):
+            logger.info(
+                "[openai_chat][cache][deepseek_official] ignored explicit cache transport profile: "
+                f"base_url={base_url} model={request.model} context_id={request.context_id or ''} "
+                f"reason=deepseek_context_cache_is_automatic cache_hints={dict(request.cache_hints)}"
             )
             return
 
@@ -511,6 +542,65 @@ class OpenAIChatEmitter(BaseEmitter):
                 f"base_url={base_url} model={model} changed={changed}"
             )
 
+    @classmethod
+    def _apply_deepseek_official_cache_compat_to_payload(
+        cls,
+        payload: Dict[str, Any],
+        *,
+        request: GenerationRequest,
+        base_url: str,
+    ) -> None:
+        """DeepSeek 官方 chat 的缓存兼容。
+
+        主干：
+        - HCZ 继续用 request.context_id + cache_domain 维护自己的缓存命名空间。
+
+        分支兼容：
+        - DeepSeek 官方缓存自动开启，不吃 UI/模型组的显式 cache transport 字段。
+        - 这里仅把 HCZ 既有缓存命名空间映射为 provider 侧 `user_id` 隔离键，
+          并在流式请求中补 `stream_options.include_usage=true` 以拿到 usage。
+        """
+        if not cls._is_deepseek_official_chat_target(base_url=base_url):
+            return
+
+        stripped_fields: List[str] = []
+        for key in DEEPSEEK_OFFICIAL_CACHE_TRANSPORT_FIELD_KEYS:
+            if key in payload:
+                payload.pop(key, None)
+                stripped_fields.append(key)
+
+        stream_include_usage_enabled = False
+        if bool(payload.get("stream")):
+            stream_options = payload.get("stream_options")
+            if not isinstance(stream_options, dict):
+                stream_options = {}
+            if not bool(stream_options.get("include_usage")):
+                stream_options["include_usage"] = True
+                stream_include_usage_enabled = True
+            if stream_options:
+                payload["stream_options"] = stream_options
+
+        existing_user_id = str(payload.get("user_id") or "").strip()
+        normalized_context_id = str(request.context_id or "").strip() or "global"
+        normalized_cache_domain = str((request.cache_hints or {}).get("cache_domain") or "").strip()
+        if existing_user_id:
+            user_id = existing_user_id
+            user_id_source = "existing"
+        else:
+            user_id = cls._build_deepseek_official_cache_partition_user_id(request, base_url=base_url)
+            payload["user_id"] = user_id
+            user_id_source = "hcz_cache_namespace"
+
+        if stripped_fields or stream_include_usage_enabled or user_id_source != "existing":
+            logger.info(
+                "[openai_chat][cache][deepseek_official] applied provider cache isolation compat: "
+                f"base_url={base_url} model={request.model} context_id={request.context_id or ''} "
+                f"cache_domain={normalized_cache_domain or '-'} namespace={normalized_context_id} "
+                f"user_id_source={user_id_source} user_id={user_id} "
+                f"stripped_fields={stripped_fields or ['<none>']} "
+                f"stream_include_usage={stream_include_usage_enabled}"
+            )
+
 
     @staticmethod
     def _resolve_image_max_long_edge(request: Optional[GenerationRequest]) -> Optional[int]:
@@ -762,6 +852,13 @@ class OpenAIChatEmitter(BaseEmitter):
         """解析单个 SSE chunk，返回增量结果或 None"""
         choices = data.get("choices", [])
         if not choices:
+            usage = data.get("usage")
+            if isinstance(usage, dict):
+                return GenerationResult(
+                    finish_reason="",
+                    usage=usage,
+                    raw_response=data,
+                )
             return None
 
         delta = choices[0].get("delta", {})
@@ -853,6 +950,7 @@ class OpenAIChatEmitter(BaseEmitter):
         self._apply_internal_message_fields_to_payload(payload, base_url=base_url, model=request.model)
         self._apply_cache_hints_to_payload(payload, request=request, base_url=base_url)
         self._normalize_deepseek_official_messages_in_place(payload, base_url=base_url, model=request.model)
+        self._apply_deepseek_official_cache_compat_to_payload(payload, request=request, base_url=base_url)
 
         url = f"{base_url.rstrip('/')}/chat/completions"
         headers = {
@@ -895,6 +993,7 @@ class OpenAIChatEmitter(BaseEmitter):
         self._apply_internal_message_fields_to_payload(payload, base_url=base_url, model=request.model)
         self._apply_cache_hints_to_payload(payload, request=request, base_url=base_url)
         self._normalize_deepseek_official_messages_in_place(payload, base_url=base_url, model=request.model)
+        self._apply_deepseek_official_cache_compat_to_payload(payload, request=request, base_url=base_url)
 
         url = f"{base_url.rstrip('/')}/chat/completions"
         headers = {
