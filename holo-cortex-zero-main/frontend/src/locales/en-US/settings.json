@@ -1,0 +1,175 @@
+{
+  "title": "Settings",
+  "tabs": {
+    "system": "System",
+    "modelGroups": "LLM"
+  },
+  "system": {
+    "emptyMessage": "No system configuration items",
+    "actions": {
+      "restart": "Restart System"
+    }
+  },
+  "modelGroup": {
+    "title": "LLM Management",
+    "addGroup": "Add LLM",
+    "editGroup": "Edit LLM",
+    "deleteGroup": "Delete LLM",
+    "name": "LLM Name",
+    "description": "Description",
+    "emptyMessage": "No LLM",
+    "deleteConfirm": "Are you sure you want to delete this LLM?",
+    "deleteSuccess": "LLM deleted successfully",
+    "saveSuccess": "LLM saved successfully",
+    "types": {
+      "chat": "Text Output",
+      "embedding": "Vector Mapping",
+      "draw": "Image Output"
+    },
+    "typeDescriptions": {
+      "chat": "Model for text conversation and content generation",
+      "embedding": "Model for mapping text into vector representations",
+      "draw": "Model for generating image content"
+    },
+    "form": {
+      "groupName": "LLM Name",
+      "connectionConfig": "Connection Configuration",
+      "apiAddress": "API Address",
+      "apiKey": "API Key",
+      "useGlobalProxy": "Enable Global Proxy",
+      "proxyAddress": "Proxy Address",
+      "modelName": "Model Name",
+      "modelType": "Model Type",
+      "wireApi": "Protocol Emitter",
+      "temperature": "Temperature (Randomness)",
+      "topP": "Top P (Diversity)",
+      "topK": "Top K (Candidate Count)",
+      "maxOutputTokens": "Total Output Token Limit",
+      "imageMaxCount": "Image Count Limit",
+      "cacheTransportProfile": "Cache Format",
+      "reasoningMode": "Reasoning Mode",
+      "textVerbosity": "Body Verbosity",
+      "replayReasoningContent": "Replay Reasoning Chain",
+      "presencePenalty": "Presence Penalty (New Topic)",
+      "frequencyPenalty": "Frequency Penalty (Repetition)",
+      "extraBody": "Extra Body (JSON Parameters)"
+    },
+    "placeholders": {
+      "apiAddress": "",
+      "modelName": "gpt-4o"
+    },
+    "providers": {
+      "deepseek": "DeepSeek",
+      "googleGemini": "Google Gemini",
+      "tongyiQianwen": "Tongyi Qianwen",
+      "doubao": "Doubao",
+      "kimi": "Kimi",
+      "zhipuQingyan": "Zhipu Qingyan",
+      "baiduQianfan": "Baidu Qianfan",
+      "iflytekSpark": "iFlytek Spark",
+      "baichuan": "Baichuan",
+      "tencentHunyuan": "Tencent Hunyuan",
+      "sensetimeRixin": "SenseTime Rixin"
+    },
+    "helpers": {
+      "apiAddress": "Select a common provider from the list, or enter any OpenAI API base address",
+      "modelName": "If the list cannot be fetched, enter the model name manually",
+      "wireApi": "default keeps automatic detection; chat / responses / gemini explicitly force the corresponding protocol",
+      "advanced": "Advanced Options",
+      "expandAdvanced": "Expand Advanced Options ▶",
+      "collapseAdvanced": "Collapse Advanced Options ▼",
+      "nameCopy": "Set a new name for the copied LLM",
+      "nameChar": "The group name cannot contain URL special characters (such as / ? & # = %), and cannot be changed after creation",
+      "fetchPrecondition": "Please fill in the API address and key before fetching available models",
+      "connectionPrecondition": "Please fill in the API address and model name before testing connectivity",
+      "useGlobalProxy": "After enabling, all traffic uses the Default Proxy in system settings; when disabled, this LLM continues to use its own proxy address or direct connection",
+      "temperature": "Controls output randomness (0-2)",
+      "topP": "Controls output diversity (0-1)",
+      "topK": "Limits the number of candidate tokens; smaller values are more conservative",
+      "maxOutputTokens": "Limits the total output token count, directly affecting duration and answer length",
+      "imageMaxCount": "Blank means unlimited; 0 disables images; with a positive integer limit, built-in reference images are preserved first, and remaining images are degraded to text from old to new",
+      "cacheTransportProfile": "default keeps the current automatic strategy; cache_control / prompt_cache_key / cache_prompt force the request field; off disables explicit cache fields",
+      "reasoningMode": "Controls reasoning chain strength; default means no override, off disables the reasoning chain",
+      "textVerbosity": "Controls the detail level of the final body text",
+      "replayReasoningContent": "After enabling, the model-returned reasoning_content is carried back verbatim into later tool requests; enable only for reasoning-chain LLMs that clearly support this field",
+      "presencePenalty": "Penalty for new content based on content already appearing in the generated text (-2 to 2)",
+      "frequencyPenalty": "Penalty for new content based on the frequency of content appearing in the generated text (-2 to 2)",
+      "extraBody": "Additional request parameters (JSON format)"
+    },
+    "options": {
+      "default": "default",
+      "chat": "chat",
+      "responses": "responses",
+      "gemini": "gemini",
+      "cacheDefault": "Default",
+      "cacheControl": "cache_control",
+      "promptCacheKey": "prompt_cache_key",
+      "cachePrompt": "cache_prompt=True",
+      "cacheOff": "Disable Cache",
+      "off": "off",
+      "minimal": "minimal",
+      "low": "low",
+      "medium": "medium",
+      "high": "high"
+    },
+    "actions": {
+      "fetchModels": "Fetch Available Models",
+      "fetching": "Fetching",
+      "testConnection": "Test Connectivity",
+      "testingConnection": "Testing",
+      "createCopy": "Create Copy",
+      "saveFailed": "Save failed"
+    },
+    "validation": {
+      "nameRequired": "Group name is required",
+      "nameInvalid": "The group name cannot contain URL special characters (such as / ? & # = %)",
+      "nameExists": "LLM name \"{{name}}\" already exists, please use another name",
+      "fetchSuccess": "Fetched {{count}} available models",
+      "fetchEmpty": "No model list was fetched, please enter the model name manually",
+      "fetchError": "Failed to fetch model list: {{error}}. Please enter the model name manually",
+      "connectionSuccess": "Connectivity normal: {{protocol}}, {{latency}}ms",
+      "connectionSuspected": "Suspected unavailable: {{protocol}}, {{error}}",
+      "connectionError": "Connectivity test failed: {{protocol}}, {{error}}",
+      "saveConnectionSuccess": "LLM \"{{name}}\" saved, connectivity normal: {{protocol}}, {{latency}}ms",
+      "saveConnectionSuspected": "LLM \"{{name}}\" saved, but suspected unavailable: {{protocol}}, {{error}}",
+      "saveConnectionError": "LLM \"{{name}}\" saved, but connectivity failed: {{protocol}}, {{error}}"
+    },
+    "dialog": {
+      "createTitle": "New LLM",
+      "editTitle": "Edit LLM",
+      "copyTitle": "Copy LLM"
+    },
+    "table": {
+      "groupName": "LLM Name",
+      "modelName": "Model Name",
+      "modelType": "Model Type",
+      "apiAddress": "API Address",
+      "proxyMode": "Proxy Mode",
+      "proxyAddress": "Proxy Address",
+      "actions": "Actions"
+    },
+    "chips": {
+      "globalProxyEnabled": "Global Proxy"
+    },
+    "tooltips": {
+      "visitProvider": "Open provider website",
+      "providerWebsiteUnavailable": "No official website is available for local or unknown APIs",
+      "edit": "Edit LLM",
+      "copy": "Copy LLM",
+      "delete": "Delete LLM",
+      "defaultDelete": "Default LLM cannot be deleted"
+    },
+    "notifications": {
+      "deleteSuccess": "LLM \"{{name}}\" deleted!",
+      "deleteFailed": "Delete failed",
+      "saveSuccess": "Model configuration saved successfully",
+      "copySuccess": "LLM \"{{name}}\" model configuration copied successfully",
+      "nameExists": "LLM name \"{{name}}\" already exists, please use another name～ (>﹏<)"
+    },
+    "deleteDialog": {
+      "title": "Confirm Delete LLM",
+      "content": "Are you sure you want to delete LLM \"{{name}}\"? This operation cannot be recovered!",
+      "confirm": "Confirm Delete"
+    }
+  }
+}

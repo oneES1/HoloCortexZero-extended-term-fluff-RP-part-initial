@@ -1,0 +1,212 @@
+# 运行 `export HCZ_DATA_DIR=./data` 设定数据目录；生产部署可显式改为 `/srv/holo_cortex_zero`
+# 首次安装可运行 `sudo docker compose up -d --build` 构建并启动。
+# 普通源码热更新运行 `sudo docker compose up -d --no-deps --force-recreate holo_cortex_zero`。
+# 依赖、Dockerfile、入口脚本改动运行 `sudo docker compose up -d --no-deps --build --force-recreate holo_cortex_zero`。
+
+services:
+  # 权限初始化服务
+  hcz_permissions_init:
+    image: holo-cortex-zero-with-ffprobe:local
+    container_name: ${INSTANCE_NAME:-}hcz_permissions_init
+    command:
+      - bash
+      - -lc
+      - /usr/local/bin/hcz_permissions_init.sh
+    environment:
+      - HCZ_DATA_DIR=/app/data
+      - HCZ_WORKSPACE_ROOT=/workspace
+      - HCZ_RUNTIME_UID=${HCZ_RUNTIME_UID:-1000}
+      - HCZ_RUNTIME_GID=${HCZ_RUNTIME_GID:-1000}
+    volumes:
+      - ${HCZ_DATA_DIR}/configs:/app/data/configs:rw
+      - ${HCZ_DATA_DIR}/logs:/app/data/logs:rw
+      - ${HCZ_DATA_DIR}/uploads:/app/data/uploads:rw
+      - ${HCZ_DATA_DIR}/tool_state:/app/data/tool_state:rw
+      - ${HCZ_DATA_DIR}/system:/app/data/system:rw
+      - ${HCZ_DATA_DIR}/quarantine_uploads:/app/data/quarantine_uploads:rw
+      - ${HCZ_DATA_DIR}/tmp:/app/data/tmp:rw
+      - ${HCZ_DATA_DIR}/backups:/app/data/backups:rw
+      - ${HCZ_DATA_DIR}/napcat_data:/app/data/napcat_data:rw
+      - ${HCZ_WORKSPACE_DIR:-.}:/workspace:rw
+      - ${HCZ_SOURCE_DIR:-./holo-cortex-zero-main}/docker/init_runtime_permissions.sh:/usr/local/bin/hcz_permissions_init.sh:ro
+    network_mode: none
+    restart: "no"
+
+  # PostgreSQL 服务
+  hcz_postgres:
+    image: postgres:14@sha256:4519de92ae505d7ea7274c4e73105e12cc892efedbfd02d7c0bd9811280f883c
+    container_name: ${INSTANCE_NAME:-}hcz_postgres
+    entrypoint:
+      - bash
+      - -lc
+      - /usr/local/bin/hcz_postgres_entrypoint.sh
+    environment:
+      TZ: Asia/Shanghai
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DATABASE}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ${HCZ_DATA_DIR}/postgres_data:/var/lib/postgresql/data
+      - ${HCZ_SOURCE_DIR:-./holo-cortex-zero-main}/scripts/hcz_postgres_entrypoint.sh:/usr/local/bin/hcz_postgres_entrypoint.sh:ro
+    networks:
+      - hcz_network
+    depends_on:
+      hcz_permissions_init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # Qdrant 服务
+  hcz_qdrant:
+    image: qdrant/qdrant@sha256:b3063c673f3973877c038eeecc392bad5011f072ee7892b56c9a8e204a3bdea9
+    container_name: ${INSTANCE_NAME:-}hcz_qdrant
+    environment:
+      - TZ=Asia/Shanghai
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:-}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ${HCZ_DATA_DIR}/qdrant_data:/qdrant/storage:z
+    networks:
+      - hcz_network
+    depends_on:
+      hcz_permissions_init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -lc 'exec 3<>/dev/tcp/127.0.0.1/6333; printf \"GET /healthz HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n\" >&3; grep -q \"200 OK\" <&3'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # 主服务
+  holo_cortex_zero:
+    build:
+      context: ${HCZ_SOURCE_DIR:-./holo-cortex-zero-main}
+      dockerfile: dockerfile
+      network: ${HCZ_BUILD_NETWORK:-default}
+      args:
+        HTTP_PROXY: ${HCZ_BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${HCZ_BUILD_HTTPS_PROXY:-}
+        ALL_PROXY: ${HCZ_BUILD_ALL_PROXY:-}
+        NO_PROXY: ${HCZ_BUILD_NO_PROXY:-}
+        NPM_REGISTRY: ${HCZ_NPM_REGISTRY:-}
+        UV_DEFAULT_INDEX: ${HCZ_UV_DEFAULT_INDEX:-}
+        APT_DEBIAN_MIRROR: ${HCZ_APT_DEBIAN_MIRROR:-}
+        APT_SECURITY_MIRROR: ${HCZ_APT_SECURITY_MIRROR:-}
+        APT_NO_PROXY: ${HCZ_APT_NO_PROXY:-}
+    image: holo-cortex-zero-with-ffprobe:local
+    pull_policy: never
+    container_name: ${INSTANCE_NAME:-}holo_cortex_zero
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONPATH=/app
+      - HCZ_INSTANCE_NAME=${INSTANCE_NAME:-}holo_cortex_zero
+      - HCZ_WORKSPACE_ROOT=/workspace
+      - HCZ_RUNTIME_UID=${HCZ_RUNTIME_UID:-1000}
+      - HCZ_RUNTIME_GID=${HCZ_RUNTIME_GID:-1000}
+      - HCZ_RUNTIME_UMASK=${HCZ_RUNTIME_UMASK:-0002}
+      - HCZ_DATA_DIR=/app/data
+      - HCZ_STATIC_DIR=/app/frontend/dist
+      - HCZ_EXPOSE_PORT=${HCZ_EXPOSE_PORT:-20261}
+      - PORT=${HCZ_EXPOSE_PORT:-20261}
+      - HCZ_POSTGRES_HOST=${POSTGRES_HOST:-hcz_postgres}
+      - HCZ_POSTGRES_PORT=5432
+      - HCZ_POSTGRES_USER=${POSTGRES_USER:-holo_cortex_zero}
+      - HCZ_POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-holo_cortex_zero}
+      - HCZ_POSTGRES_DATABASE=${POSTGRES_DATABASE:-holo_cortex_zero}
+      - HCZ_RUN_IN_DOCKER=true
+      - HCZ_ADMIN_USERNAME=${HCZ_ADMIN_USERNAME:-admin}
+      - HCZ_ADMIN_PASSWORD=${HCZ_ADMIN_PASSWORD:-}
+      - ONEBOT_ACCESS_TOKEN=${ONEBOT_ACCESS_TOKEN:-?SA0WZ4HhGgnpT1(}
+      - ONEBOT_V11_ACCESS_TOKEN=${ONEBOT_ACCESS_TOKEN:-?SA0WZ4HhGgnpT1(}
+      - HCZ_QDRANT_URL=${QDRANT_URL:-http://hcz_qdrant:6333}
+      - HCZ_QDRANT_API_KEY=${QDRANT_API_KEY:-}
+    command:
+      - bash
+      - -lc
+      - /usr/local/bin/hcz_runtime_entrypoint.sh
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HCZ_DATA_DIR}/home:/app/data/home:rw
+      - ${HCZ_DATA_DIR}/configs:/app/data/configs:rw
+      - ${HCZ_DATA_DIR}/logs:/app/data/logs:rw
+      - ${HCZ_DATA_DIR}/uploads:/app/data/uploads:rw
+      - ${HCZ_DATA_DIR}/tool_state:/app/data/tool_state:rw
+      - ${HCZ_DATA_DIR}/system:/app/data/system:rw
+      - ${HCZ_DATA_DIR}/quarantine_uploads:/app/data/quarantine_uploads:rw
+      - ${HCZ_DATA_DIR}/tmp:/app/data/tmp:rw
+      - ${HCZ_DATA_DIR}/backups:/app/data/backups:rw
+      - ${HCZ_DATA_DIR}/napcat_data:/app/data/napcat_data:rw
+      - ${HCZ_WORKSPACE_DIR:-.}:/workspace:rw
+      - ${HCZ_SOURCE_DIR:-./holo-cortex-zero-main}/holo_cortex_zero:/app/holo_cortex_zero:ro
+      - ${HCZ_SOURCE_DIR:-./holo-cortex-zero-main}/tool_runtime:/app/tool_runtime:ro
+      - ${HCZ_SOURCE_DIR:-./holo-cortex-zero-main}/frontend/dist:/app/frontend/dist:ro
+      - ${HCZ_SOURCE_DIR:-./holo-cortex-zero-main}/scripts/hcz_runtime_entrypoint.sh:/usr/local/bin/hcz_runtime_entrypoint.sh:ro
+    depends_on:
+      hcz_permissions_init:
+        condition: service_completed_successfully
+      hcz_postgres:
+        condition: service_healthy
+      hcz_qdrant:
+        condition: service_healthy
+    ports:
+      - "${HCZ_EXPOSE_PORT:-20261}:${HCZ_EXPOSE_PORT:-20261}"
+    networks:
+      - hcz_network
+    restart: unless-stopped
+
+  # Napcat 服务
+  hcz_napcat:
+    image: mlikiowa/napcat-docker@sha256:d8098fdabedfe5cbc570b994aebb685c3096a2bebbf4ea43ffb21655a4758e63
+    container_name: ${INSTANCE_NAME:-}hcz_napcat
+    user: "0:${HCZ_RUNTIME_GID:-1000}"
+    entrypoint:
+      - bash
+      - -lc
+      - /usr/local/bin/hcz_napcat_entrypoint.sh
+    environment:
+      - TZ=Asia/Shanghai
+      - HCZ_RUNTIME_UID=${HCZ_RUNTIME_UID:-1000}
+      - HCZ_RUNTIME_GID=${HCZ_RUNTIME_GID:-1000}
+      - HCZ_RUNTIME_UMASK=${HCZ_RUNTIME_UMASK:-0002}
+      - ONEBOT_ACCESS_TOKEN=${ONEBOT_ACCESS_TOKEN:-?SA0WZ4HhGgnpT1(}
+      - NAPCAT_WEBUI_PORT=${NAPCAT_WEBUI_PORT:-65535}
+    expose:
+      - "${NAPCAT_WEBUI_PORT:-65535}"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ${HCZ_WORKSPACE_DIR:-.}:/workspace:ro
+      - ${HCZ_DATA_DIR}/napcat_data:/app/data/napcat_data:rw
+      - ${HCZ_DATA_DIR}/napcat_data/QQ:/app/.config/QQ
+      - ${HCZ_DATA_DIR}/napcat_data/napcat:/app/napcat/config
+      - ${HCZ_SOURCE_DIR:-./holo-cortex-zero-main}/scripts/hcz_napcat_entrypoint.sh:/usr/local/bin/hcz_napcat_entrypoint.sh:ro
+    networks:
+      - hcz_network
+    depends_on:
+      hcz_permissions_init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS --max-time 3 \"http://127.0.0.1:$${NAPCAT_WEBUI_PORT:-65535}/\" >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    restart: unless-stopped
+
+networks:
+  hcz_network:
+    name: ${INSTANCE_NAME:-}hcz_network
+    driver: bridge

@@ -1,0 +1,99 @@
+# HoloCortexZero 开发环境 Docker Compose
+# 用于启动开发所需的依赖服务，主应用通过源码运行
+#
+# 使用方法:
+# docker compose -f docker/docker-compose.dev.yml up -d
+
+services:
+  # 权限初始化服务
+  hcz_permissions_init:
+    image: holo-cortex-zero-local:latest
+    command:
+      - bash
+      - -lc
+      - /usr/local/bin/hcz_permissions_init.sh
+    environment:
+      - HCZ_DATA_DIR=/app/data
+      - HCZ_WORKSPACE_ROOT=/workspace
+      - HCZ_RUNTIME_UID=${HCZ_RUNTIME_UID:-1000}
+      - HCZ_RUNTIME_GID=${HCZ_RUNTIME_GID:-1000}
+    volumes:
+      - ../data:/app/data:rw
+      - ../..:/workspace:rw
+      - ./init_runtime_permissions.sh:/usr/local/bin/hcz_permissions_init.sh:ro
+    restart: "no"
+
+  # PostgreSQL 服务
+  hcz_postgres:
+    image: postgres:14@sha256:4519de92ae505d7ea7274c4e73105e12cc892efedbfd02d7c0bd9811280f883c
+    container_name: hcz_dev_postgres
+    entrypoint:
+      - bash
+      - -lc
+      - /usr/local/bin/hcz_postgres_entrypoint.sh
+    environment:
+      POSTGRES_USER: holo_cortex_zero
+      POSTGRES_PASSWORD: holo_cortex_zero
+      POSTGRES_DB: holo_cortex_zero_dev
+    ports:
+      - "127.0.0.1:5433:5432"  # 使用 5433 避免与本地 PostgreSQL 冲突
+    volumes:
+      - ../data/dev_postgres_data:/var/lib/postgresql/data
+      - ../scripts/hcz_postgres_entrypoint.sh:/usr/local/bin/hcz_postgres_entrypoint.sh:ro
+    networks:
+      - hcz_network
+    depends_on:
+      hcz_permissions_init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Qdrant 服务
+  hcz_qdrant:
+    image: qdrant/qdrant@sha256:b3063c673f3973877c038eeecc392bad5011f072ee7892b56c9a8e204a3bdea9
+    container_name: hcz_dev_qdrant
+    environment:
+      - QDRANT__SERVICE__API_KEY=your-qdrant-api-key
+    ports:
+      - "127.0.0.1:6334:6333" # 使用 6334 避免与生产环境 Qdrant 冲突
+    volumes:
+      - ../data/dev_qdrant_data:/qdrant/storage:z
+    networks:
+      - hcz_network
+    depends_on:
+      hcz_permissions_init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Napcat 服务
+  hcz_napcat:
+    image: mlikiowa/napcat-docker@sha256:d8098fdabedfe5cbc570b994aebb685c3096a2bebbf4ea43ffb21655a4758e63
+    container_name: hcz_dev_napcat
+    user: "0:${HCZ_RUNTIME_GID:-1000}"
+    entrypoint:
+      - bash
+      - -lc
+      - /usr/local/bin/hcz_napcat_entrypoint.sh
+    environment:
+      - HCZ_RUNTIME_UID=${HCZ_RUNTIME_UID:-1000}
+      - HCZ_RUNTIME_GID=${HCZ_RUNTIME_GID:-1000}
+      - HCZ_RUNTIME_UMASK=${HCZ_RUNTIME_UMASK:-0002}
+      - NAPCAT_WEBUI_PORT=${NAPCAT_WEBUI_PORT:-65535}
+    ports:
+      - "127.0.0.1:${NAPCAT_WEBUI_PORT:-65535}:${NAPCAT_WEBUI_PORT:-65535}"
+    volumes:
+      - ../data:/app/data
+      - ../..:/workspace:ro
+      - ../data/napcat_data/QQ:/app/.config/QQ
+      - ../data/napcat_data/napcat:/app/napcat/config
+      - ../scripts/hcz_napcat_entrypoint.sh:/usr/local/bin/hcz_napcat_entrypoint.sh:ro
+    networks:
+      - hcz_network
+    depends_on:
+      hcz_permissions_init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+networks:
+  hcz_network:
+    name: hcz_dev_network
+    driver: bridge

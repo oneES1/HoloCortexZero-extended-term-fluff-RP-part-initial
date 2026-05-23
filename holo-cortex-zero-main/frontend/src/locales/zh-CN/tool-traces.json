@@ -1,0 +1,76 @@
+{
+  "title": "Tool链日志",
+  "stats": {
+    "total": "总运行次数",
+    "success": "成功次数",
+    "failed": "失败次数",
+    "agentCount": "代理停止次数",
+    "successRate": "成功率",
+    "successRateRecent": "近500条成功率",
+    "successRunsRecent": "近500次成功轮数"
+  },
+  "table": {
+    "status": "状态",
+    "stopType": "停止类型",
+    "triggerUser": "触发用户",
+    "chatKey": "对话窗口",
+    "model": "模型",
+    "duration": "LLM耗时 | Tool耗时",
+    "iterations": "轮次",
+    "time": "时间",
+    "unknown": "未知"
+  },
+  "status": {
+    "success": "成功",
+    "failed": "失败",
+    "successTooltip": "运行成功",
+    "failedTooltip": "运行失败"
+  },
+  "actions": {
+    "noContent": "无内容可复制",
+    "copied": "{{content}}已复制到剪贴板",
+    "copyFailed": "复制失败，请重试"
+  },
+  "detail": {
+    "metaTitle": "运行元信息",
+    "contextId": "上下文窗口",
+    "activeDialog": "回复窗口",
+    "permission": "权限级别",
+    "trigger": "触发消息",
+    "copyTrigger": "复制触发消息",
+    "summary": "运行摘要",
+    "copyOutput": "复制运行摘要",
+    "empty": "无",
+    "noTrigger": "无触发消息",
+    "noResult": "无摘要",
+    "trace": {
+      "title": "运行轨迹",
+      "copyTrace": "复制轨迹 JSON",
+      "totalIterations": "轮次 {{count}}",
+      "totalDuration": "总耗时 {{value}}",
+      "llmDuration": "LLM {{value}}",
+      "toolDuration": "Tool {{value}}",
+      "models": "模型 {{value}}",
+      "llmRoundTitle": "LLM 第 {{iteration}} 轮",
+      "assistantTitle": "文本消息 第 {{iteration}} 轮",
+      "toolTitle": "工具 {{name}} · 第 {{iteration}} 轮",
+      "errorTitle": "异常 · 第 {{iteration}} 轮",
+      "finishReason": "结束原因 {{value}}",
+      "toolCalls": "工具调用 {{count}} 个",
+      "textLength": "文本长度 {{count}}",
+      "tokenUsage": "Token {{prompt}}/{{completion}}/{{total}}",
+      "cacheUsage": "缓存 {{cached}} · {{ratio}}",
+      "rawUsage": "网关 Usage 原文",
+      "arguments": "调用参数",
+      "resultPreview": "结果摘要",
+      "reasoningContent": "思维链",
+      "noReasoningContent": "无思维链",
+      "kind": {
+        "llm": "LLM",
+        "assistant": "文本",
+        "tool": "Tool",
+        "error": "错误"
+      }
+    }
+  }
+}

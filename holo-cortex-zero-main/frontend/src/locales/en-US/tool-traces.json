@@ -1,0 +1,76 @@
+{
+  "title": "Tool Chain Logs",
+  "stats": {
+    "total": "Total Runs",
+    "success": "Successful",
+    "failed": "Failed",
+    "agentCount": "Agent Stops",
+    "successRate": "Success Rate",
+    "successRateRecent": "Last 500 Success Rate",
+    "successRunsRecent": "Successful Runs in Last 500"
+  },
+  "table": {
+    "status": "Status",
+    "stopType": "Stop Type",
+    "triggerUser": "Trigger User",
+    "chatKey": "Dialog",
+    "model": "Model",
+    "duration": "LLM Time | Tool Time",
+    "iterations": "Rounds",
+    "time": "Time",
+    "unknown": "Unknown"
+  },
+  "status": {
+    "success": "Success",
+    "failed": "Failed",
+    "successTooltip": "Run succeeded",
+    "failedTooltip": "Run failed"
+  },
+  "actions": {
+    "noContent": "No content to copy",
+    "copied": "{{content}} copied to clipboard",
+    "copyFailed": "Copy failed, please try again"
+  },
+  "detail": {
+    "metaTitle": "Run Metadata",
+    "contextId": "Context",
+    "activeDialog": "Reply Dialog",
+    "permission": "Permission",
+    "trigger": "Trigger Message",
+    "copyTrigger": "Copy Trigger Message",
+    "summary": "Run Summary",
+    "copyOutput": "Copy Run Summary",
+    "empty": "None",
+    "noTrigger": "No trigger message",
+    "noResult": "No summary",
+    "trace": {
+      "title": "Run Trace",
+      "copyTrace": "Copy trace JSON",
+      "totalIterations": "Rounds {{count}}",
+      "totalDuration": "Total {{value}}",
+      "llmDuration": "LLM {{value}}",
+      "toolDuration": "Tool {{value}}",
+      "models": "Model {{value}}",
+      "llmRoundTitle": "LLM Round {{iteration}}",
+      "assistantTitle": "Text Round {{iteration}}",
+      "toolTitle": "Tool {{name}} · Round {{iteration}}",
+      "errorTitle": "Error · Round {{iteration}}",
+      "finishReason": "Finish {{value}}",
+      "toolCalls": "Tool calls {{count}}",
+      "textLength": "Text length {{count}}",
+      "tokenUsage": "Tokens {{prompt}}/{{completion}}/{{total}}",
+      "cacheUsage": "Cache {{cached}} · {{ratio}}",
+      "rawUsage": "Gateway Usage",
+      "arguments": "Arguments",
+      "resultPreview": "Result Preview",
+      "reasoningContent": "Reasoning Content",
+      "noReasoningContent": "No reasoning content",
+      "kind": {
+        "llm": "LLM",
+        "assistant": "Text",
+        "tool": "Tool",
+        "error": "Error"
+      }
+    }
+  }
+}

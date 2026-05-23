@@ -1,0 +1,175 @@
+{
+  "title": "设置",
+  "tabs": {
+    "system": "系统",
+    "modelGroups": "LLM"
+  },
+  "system": {
+    "emptyMessage": "暂无系统配置项",
+    "actions": {
+      "restart": "重启系统"
+    }
+  },
+  "modelGroup": {
+    "title": "LLM管理",
+    "addGroup": "新增LLM",
+    "editGroup": "编辑LLM",
+    "deleteGroup": "删除LLM",
+    "name": "LLM名称",
+    "description": "描述",
+    "emptyMessage": "暂无LLM",
+    "deleteConfirm": "确定要删除此LLM吗？",
+    "deleteSuccess": "LLM删除成功",
+    "saveSuccess": "LLM保存成功",
+    "types": {
+      "chat": "输出文本",
+      "embedding": "向量映射",
+      "draw": "输出图片"
+    },
+    "typeDescriptions": {
+      "chat": "用于文本对话与内容生成的模型",
+      "embedding": "用于将文本映射为向量表示的模型",
+      "draw": "用于生成图像内容的模型"
+    },
+    "form": {
+      "groupName": "LLM名称",
+      "connectionConfig": "连接配置",
+      "apiAddress": "API地址",
+      "apiKey": "API密钥",
+      "useGlobalProxy": "启用全局代理",
+      "proxyAddress": "代理地址",
+      "modelName": "模型名称",
+      "modelType": "模型类型",
+      "wireApi": "协议发射器",
+      "temperature": "Temperature (随机性)",
+      "topP": "Top P (多样性)",
+      "topK": "Top K (候选数)",
+      "maxOutputTokens": "总输出 Token 上限",
+      "imageMaxCount": "图片数量上限",
+      "cacheTransportProfile": "缓存格式",
+      "reasoningMode": "思维模式",
+      "textVerbosity": "正文冗长度",
+      "replayReasoningContent": "回放思维链",
+      "presencePenalty": "Presence Penalty (新话题)",
+      "frequencyPenalty": "Frequency Penalty (重复度)",
+      "extraBody": "Extra Body (JSON参数)"
+    },
+    "placeholders": {
+      "apiAddress": "",
+      "modelName": "gpt-4o"
+    },
+    "providers": {
+      "deepseek": "DeepSeek",
+      "googleGemini": "谷歌Gemini",
+      "tongyiQianwen": "通义千问",
+      "doubao": "豆包",
+      "kimi": "Kimi",
+      "zhipuQingyan": "智谱清言",
+      "baiduQianfan": "百度千帆",
+      "iflytekSpark": "科大讯飞",
+      "baichuan": "百川",
+      "tencentHunyuan": "腾讯混元",
+      "sensetimeRixin": "商汤日日新"
+    },
+    "helpers": {
+      "apiAddress": "从列表中选择常用供应商，或输入任意 OpenAI 接口基准地址",
+      "modelName": "若无法获取列表，请直接手动输入模型名称",
+      "wireApi": "default 保持自动判定；chat / responses / gemini 会显式强制走对应协议",
+      "advanced": "高级选项",
+      "expandAdvanced": "展开高级选项 ▶",
+      "collapseAdvanced": "收起高级选项 ▼",
+      "nameCopy": "请为复制的LLM设置一个新名称",
+      "nameChar": "组名不能包含URL特殊字符 (如 / ? & # = %)，创建后不可修改",
+      "fetchPrecondition": "请先填写 API 地址与密钥后再获取可用模型",
+      "connectionPrecondition": "请先填写 API 地址与模型名称后再测试连通性",
+      "useGlobalProxy": "启用后统一走系统设置中的“默认代理”；未启用时继续使用该LLM自己的代理地址或直连",
+      "temperature": "控制输出的随机性 (0-2)",
+      "topP": "控制输出的多样性 (0-1)",
+      "topK": "限制候选 token 数量，数值越小越保守",
+      "maxOutputTokens": "限制总输出 token 上限，直接影响时长与回答长度",
+      "imageMaxCount": "留空表示不限；0 表示禁用图片；正整数限额下会优先保留内置设定图，其余图片按从旧到新降级为文本",
+      "cacheTransportProfile": "default 保持当前自动策略；cache_control / prompt_cache_key / cache_prompt 会强制指定请求字段；off 关闭显式缓存字段",
+      "reasoningMode": "控制思维链强度；default 为不覆盖，off 为关闭思维链",
+      "textVerbosity": "控制最终正文的详细程度",
+      "replayReasoningContent": "启用后把模型返回的 reasoning_content 原样带回后续 tool 请求；仅给明确支持该字段的思维链LLM开启",
+      "presencePenalty": "基于生成文本中已出现的内容对新内容的惩罚 (-2 到 2)",
+      "frequencyPenalty": "基于生成文本中出现的内容频率对新内容的惩罚 (-2 到 2)",
+      "extraBody": "额外的请求参数 (JSON 格式)"
+    },
+    "options": {
+      "default": "default",
+      "chat": "chat",
+      "responses": "responses",
+      "gemini": "gemini",
+      "cacheDefault": "默认",
+      "cacheControl": "cache_control",
+      "promptCacheKey": "prompt_cache_key",
+      "cachePrompt": "cache_prompt=True",
+      "cacheOff": "关闭缓存",
+      "off": "off",
+      "minimal": "minimal",
+      "low": "low",
+      "medium": "medium",
+      "high": "high"
+    },
+    "actions": {
+      "fetchModels": "获取可用模型",
+      "fetching": "正在获取",
+      "testConnection": "测试连通性",
+      "testingConnection": "测试中",
+      "createCopy": "创建副本",
+      "saveFailed": "保存失败"
+    },
+    "validation": {
+      "nameRequired": "组名不能为空",
+      "nameInvalid": "组名不能包含URL特殊字符 (如 / ? & # = %)",
+      "nameExists": "LLM名称 \"{{name}}\" 已存在，请使用其他名称",
+      "fetchSuccess": "已获取到 {{count}} 个可用模型",
+      "fetchEmpty": "未获取到模型列表，请手动输入模型名称",
+      "fetchError": "获取模型列表失败：{{error}}。请手动输入模型名称",
+      "connectionSuccess": "连通性正常：{{protocol}}，{{latency}}ms",
+      "connectionSuspected": "疑似不可用：{{protocol}}，{{error}}",
+      "connectionError": "连通性测试失败：{{protocol}}，{{error}}",
+      "saveConnectionSuccess": "LLM \"{{name}}\" 已保存，连通性正常：{{protocol}}，{{latency}}ms",
+      "saveConnectionSuspected": "LLM \"{{name}}\" 已保存，但疑似不可用：{{protocol}}，{{error}}",
+      "saveConnectionError": "LLM \"{{name}}\" 已保存，但连通性失败：{{protocol}}，{{error}}"
+    },
+    "dialog": {
+      "createTitle": "新建LLM",
+      "editTitle": "编辑LLM",
+      "copyTitle": "复制LLM"
+    },
+    "table": {
+      "groupName": "LLM名称",
+      "modelName": "模型名称",
+      "modelType": "模型类型",
+      "apiAddress": "API地址",
+      "proxyMode": "代理策略",
+      "proxyAddress": "代理地址",
+      "actions": "操作"
+    },
+    "chips": {
+      "globalProxyEnabled": "全局代理"
+    },
+    "tooltips": {
+      "visitProvider": "打开供应商官网",
+      "providerWebsiteUnavailable": "本地或未知接口无官网可打开",
+      "edit": "编辑LLM",
+      "copy": "复制LLM",
+      "delete": "删除LLM",
+      "defaultDelete": "默认LLM不可删除"
+    },
+    "notifications": {
+      "deleteSuccess": "LLM \"{{name}}\" 已删除！",
+      "deleteFailed": "删除失败",
+      "saveSuccess": "保存模型配置成功",
+      "copySuccess": "LLM \"{{name}}\" 复制模型配置成功",
+      "nameExists": "LLM名称 \"{{name}}\" 已存在，请换一个名称～ (>﹏<)"
+    },
+    "deleteDialog": {
+      "title": "确认删除LLM",
+      "content": "确定要删除LLM \"{{name}}\" 吗？此操作不可恢复！",
+      "confirm": "确认删除"
+    }
+  }
+}

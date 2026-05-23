@@ -1,0 +1,57 @@
+{
+  "loading": "Loading adapter information...",
+  "loadFailed": "Loading Failed",
+  "loadAdapterFailed": "Failed to load adapter information",
+  "tab": {
+    "adapterNotExist": "Adapter does not exist",
+    "pageNotExist": "Page does not exist"
+  },
+  "tabs": {
+    "config": "Config",
+    "overrides": "Overrides",
+    "logs": "Container Logs",
+    "napcat": "NapCat"
+  },
+  "names": {
+    "onebot_v11": "OneBot",
+    "telegram": "Telegram",
+    "matrix": "Matrix"
+  },
+  "override": {
+    "missingKey": "Missing adapter KEY",
+    "info": "Settings here will override the system defaults for this adapter. If an override is enabled, all chats under this adapter will use these values by default, unless the chat itself overrides them again.",
+    "emptyMessage": "No configuration items available for this adapter"
+  },
+  "napcat": {
+    "cannotGetAddress": "Cannot get NapCat access address",
+    "serviceNotRunning": "NapCat service is not running"
+  },
+  "logs": {
+    "connectFailed": "Failed to connect to log stream",
+    "cleared": "Logs cleared",
+    "tokenCopied": "Token copied to clipboard",
+    "copyFailed": "Copy failed, please copy manually",
+    "status": "Status",
+    "startTime": "Start Time",
+    "unknown": "Unknown",
+    "disconnected": "Log stream disconnected, reconnecting...",
+    "tokenNotFound": "WebUI Token not found, please check NapCat initialization status",
+    "copy": "Copy",
+    "autoScroll": "Auto Scroll",
+    "containerStatus": "Container Status",
+    "logCount": "Log Count",
+    "clear": "Clear Logs",
+    "webuiToken": "WebUI Token",
+    "copyToken": "Copy Token"
+  },
+  "config": {
+    "notSupportedTitle": "Adapter does not support configuration",
+    "notSupportedMessage": "This adapter has no configurable parameters.",
+    "emptyMessage": "No {{name}} configuration items available",
+    "title": "Configuration",
+    "description": "Manage runtime parameters for {{name}}. Changes are saved automatically.",
+    "stats": "Statistics",
+    "totalItems": "Total Items",
+    "searchPlaceholder": "Search configuration..."
+  }
+}

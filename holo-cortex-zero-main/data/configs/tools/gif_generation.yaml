@@ -1,0 +1,6 @@
+SCOPE_MODE: disabled
+STREAM_MODE: false
+TIMEOUT: 300
+DEBUG: false
+GIF_MODEL_GROUP: gemini-3.1-flash-img
+GIF_EDGE_FILTER_PIXELS: 4

@@ -1,0 +1,71 @@
+{
+  "title": "仪表盘",
+  "cards": {
+    "totalMessages": "总消息数",
+    "toolChainRuns": "Tool调用数"
+  },
+  "charts": {
+    "realTimeData": "运行概览",
+    "activeRanking": "活跃排名",
+    "noData": "暂无数据",
+    "noRealtimeData": "暂无实时数据，请等待数据收集"
+  },
+  "tooltip": {
+    "count": "数量",
+    "ratio": "占比"
+  },
+  "granularity": {
+    "label": "时间刻度",
+    "1hour": "1小时",
+    "1day": "1天",
+    "1week": "1星期",
+    "1month": "1个月",
+    "4months": "4个月"
+  },
+  "stats": {
+    "messages": "消息数",
+    "runs": "运行次数",
+    "sessions": "活跃会话",
+    "successRate": "成功率"
+  },
+  "latestMessage": {
+    "label": "最新消息",
+    "empty": "暂无消息"
+  },
+  "metrics": {
+    "toolChainRuns": "Tool调用数",
+    "successCalls": "成功运行",
+    "failedCalls": "失败运行",
+    "successRate": "运行成功率"
+  },
+  "ranking": {
+    "title": "活跃排名",
+    "messageCount": "消息数",
+    "messages": "条"
+  },
+  "errors": {
+    "parseRealTimeData": "解析实时数据失败",
+    "streamError": "仪表盘数据流错误"
+  },
+  "panels": {
+    "noTrace": "暂无链路记录",
+    "lastChainError": "链路报错",
+    "latestErrorLog": "日志历史",
+    "noErrorLog": "暂无日志历史",
+    "chainMonitor": "链条监测",
+    "contextLength": "上下文",
+    "totalDuration": "总耗时",
+    "copied": "已复制报错信息",
+    "copyFailed": "复制失败",
+    "close": "关闭",
+    "logHistory": "日志历史",
+    "noLogHistory": "暂无日志历史",
+    "noChainEvents": "暂无链条事件"
+  },
+  "time": {
+    "justNow": "刚刚",
+    "minutesAgo": "{{count}} 分钟前",
+    "hoursAgo": "{{count}} 小时前",
+    "daysAgo": "{{count}} 天前"
+  }
+}

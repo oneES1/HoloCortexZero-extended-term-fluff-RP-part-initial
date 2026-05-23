@@ -1,0 +1,70 @@
+# 目标：默认仅跟踪 plugins/ 与 holo-cortex-zero-main/
+
+# Ignore everything by default
+/*
+
+# Keep this file
+!.gitignore
+
+# Keep code roots
+!plugins/
+!plugins/**
+!holo-cortex-zero-main/
+!holo-cortex-zero-main/**
+
+# Keep governance files only (avoid accidentally tracking root runtime files)
+!.githooks/
+.githooks/*
+!.githooks/pre-commit
+!.githooks/pre-push
+
+!scripts/
+scripts/*
+!scripts/git/
+scripts/git/*
+!scripts/git/preflight.sh
+
+!docs/
+docs/*
+!docs/GIT_WORKFLOW.md
+
+!docker-compose.yml
+!.env.share.example
+!LICENSE
+!NOTICE
+!README.md
+!README_DEPLOY.md
+!README_DEPLOY_EN.md
+!make_docker_release_bundle.sh
+!hcz-docker-deploy-*.tar.gz
+
+# Allow common Python/OS noise inside tracked roots to remain untracked
+**/.DS_Store
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.venv/
+**/.ruff_cache/
+**/frontend/node_modules/
+**/frontend/dist/
+
+# Env / secrets (even if they appear under tracked roots)
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+!holo-cortex-zero-main/.env.prod
+
+# Root env example is out of scope
+/.env.example
+
+# HoloCortexZero runtime / generated stuff inside tracked roots
+plugins/.dynamic_packages/
+plugins/_git_backup/
+holo-cortex-zero-main/stage1_smoke/
+
+# Codex session ops docs
+!ops/
+ops/*
+!ops/codex-session-runbook.md
+!ops/codex-session-journal.md
