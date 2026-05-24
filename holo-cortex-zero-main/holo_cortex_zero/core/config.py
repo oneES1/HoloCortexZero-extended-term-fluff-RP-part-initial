@@ -595,15 +595,17 @@ class CoreConfig(ConfigBase):
         title="群聊回复判断LLM",
         description="系统级 ai_reply 群聊回复判断专用的 chat.completions LLM。",
         json_schema_extra=ExtraField(
-        i18n_title=i18n_text(
-            zh_CN="群聊回复判断LLM",
-            en_US="Group Chat Reply Judgment LLM",
-        ),
-        i18n_description=i18n_text(
-            zh_CN="系统级 ai_reply 群聊回复判断专用的 chat.completions LLM。",
-            en_US="Dedicated chat.completions LLM for system-level ai_reply group chat judgment.",
-        ),
-    ).model_dump(),
+            ref_model_groups=True,
+            model_type="chat",
+            i18n_title=i18n_text(
+                zh_CN="群聊回复判断LLM",
+                en_US="Group Chat Reply Judgment LLM",
+            ),
+            i18n_description=i18n_text(
+                zh_CN="系统级 ai_reply 群聊回复判断专用的 chat.completions LLM。",
+                en_US="Dedicated chat.completions LLM for system-level ai_reply group chat judgment.",
+            ),
+        ).model_dump(),
     )
     AI_REPLY_JUDGE_SYSTEM_PROMPT: str = Field(
         default="",
@@ -661,15 +663,17 @@ class CoreConfig(ConfigBase):
         title="Timeline 压缩LLM",
         description="时间线摘要压缩专用 LLM；必须显式配置有效 LLM，不再隐式回退到 default。",
         json_schema_extra=ExtraField(
-        i18n_title=i18n_text(
-            zh_CN="Timeline 压缩LLM",
-            en_US="Timeline Compression LLM",
-        ),
-        i18n_description=i18n_text(
-            zh_CN="时间线摘要压缩专用 LLM；必须显式配置有效 LLM，不再隐式回退到 default。",
-            en_US="Dedicated LLM for timeline summary compression; must be explicitly configured, no implicit fallback to default.",
-        ),
-    ).model_dump(),
+            ref_model_groups=True,
+            model_type="chat",
+            i18n_title=i18n_text(
+                zh_CN="Timeline 压缩LLM",
+                en_US="Timeline Compression LLM",
+            ),
+            i18n_description=i18n_text(
+                zh_CN="时间线摘要压缩专用 LLM；必须显式配置有效 LLM，不再隐式回退到 default。",
+                en_US="Dedicated LLM for timeline summary compression; must be explicitly configured, no implicit fallback to default.",
+            ),
+        ).model_dump(),
     )
     AI_REPLY_JUDGE_MAX_HISTORY_MESSAGES: int = Field(
         default=12,
@@ -824,15 +828,17 @@ class CoreConfig(ConfigBase):
         title="记忆管理模型",
         description="用于将传入记忆做整理与仲裁的对话 LLM。",
         json_schema_extra=ExtraField(
-        i18n_title=i18n_text(
-            zh_CN="记忆管理模型",
-            en_US="Memory Management Model",
-        ),
-        i18n_description=i18n_text(
-            zh_CN="用于将传入记忆做整理与仲裁的对话 LLM。",
-            en_US="Dialogue LLM used for organizing and arbitrating incoming memories.",
-        ),
-    ).model_dump(),
+            ref_model_groups=True,
+            model_type="chat",
+            i18n_title=i18n_text(
+                zh_CN="记忆管理模型",
+                en_US="Memory Management Model",
+            ),
+            i18n_description=i18n_text(
+                zh_CN="用于将传入记忆做整理与仲裁的对话 LLM。",
+                en_US="Dialogue LLM used for organizing and arbitrating incoming memories.",
+            ),
+        ).model_dump(),
     )
     MEMORY_ARBITER_SYSTEM_PROMPT: str = Field(
         default=DEFAULT_MEMORY_ARBITER_SYSTEM_PROMPT_TEMPLATE,
@@ -856,15 +862,17 @@ class CoreConfig(ConfigBase):
         title="记忆向量嵌入模型",
         description="用于记忆嵌入与检索的 embedding LLM。",
         json_schema_extra=ExtraField(
-        i18n_title=i18n_text(
-            zh_CN="记忆向量嵌入模型",
-            en_US="Memory Vector Embedding Model",
-        ),
-        i18n_description=i18n_text(
-            zh_CN="用于记忆嵌入与检索的 embedding LLM。",
-            en_US="Embedding LLM used for memory embedding and retrieval.",
-        ),
-    ).model_dump(),
+            ref_model_groups=True,
+            model_type="embedding",
+            i18n_title=i18n_text(
+                zh_CN="记忆向量嵌入模型",
+                en_US="Memory Vector Embedding Model",
+            ),
+            i18n_description=i18n_text(
+                zh_CN="用于记忆嵌入与检索的 embedding LLM。",
+                en_US="Embedding LLM used for memory embedding and retrieval.",
+            ),
+        ).model_dump(),
     )
     TEXT_EMBEDDING_DIMENSION: int = Field(
         default=1024,
@@ -913,15 +921,17 @@ class CoreConfig(ConfigBase):
         title="潜意识LLM",
         description="用于 Stage1 潜意识路由与意图生成的 LLM。",
         json_schema_extra=ExtraField(
-        i18n_title=i18n_text(
-            zh_CN="潜意识LLM",
-            en_US="Subconscious LLM",
-        ),
-        i18n_description=i18n_text(
-            zh_CN="用于 Stage1 潜意识路由与意图生成的 LLM。",
-            en_US="LLM used for Stage1 subconscious routing and intent generation.",
-        ),
-    ).model_dump(),
+            ref_model_groups=True,
+            model_type="chat",
+            i18n_title=i18n_text(
+                zh_CN="潜意识LLM",
+                en_US="Subconscious LLM",
+            ),
+            i18n_description=i18n_text(
+                zh_CN="用于 Stage1 潜意识路由与意图生成的 LLM。",
+                en_US="LLM used for Stage1 subconscious routing and intent generation.",
+            ),
+        ).model_dump(),
     )
     SUBCONSCIOUS_TIMEOUT_SECONDS: float = Field(
         default=15.0,
@@ -1229,15 +1239,17 @@ class CoreConfig(ConfigBase):
         title="自动记忆LLM",
         description="系统自动记忆链专用的 chat.completions LLM。",
         json_schema_extra=ExtraField(
-        i18n_title=i18n_text(
-            zh_CN="自动记忆LLM",
-            en_US="Auto Memory LLM",
-        ),
-        i18n_description=i18n_text(
-            zh_CN="系统自动记忆链专用的 chat.completions LLM。",
-            en_US="The chat.completions LLM dedicated to the system auto-memory chain.",
-        ),
-    ).model_dump(),
+            ref_model_groups=True,
+            model_type="chat",
+            i18n_title=i18n_text(
+                zh_CN="自动记忆LLM",
+                en_US="Auto Memory LLM",
+            ),
+            i18n_description=i18n_text(
+                zh_CN="系统自动记忆链专用的 chat.completions LLM。",
+                en_US="The chat.completions LLM dedicated to the system auto-memory chain.",
+            ),
+        ).model_dump(),
     )
     AUTO_MEMORY_SYSTEM_PROMPT: str = Field(
         default=DEFAULT_AUTO_MEMORY_SYSTEM_PROMPT,
@@ -1522,15 +1534,17 @@ class CoreConfig(ConfigBase):
         title="系统表情嵌入模型",
         description="用于表情标签语义匹配的 embedding 模型。",
         json_schema_extra=ExtraField(
-        i18n_title=i18n_text(
-            zh_CN="系统表情嵌入模型",
-            en_US="System Emoji Embedding Model",
-        ),
-        i18n_description=i18n_text(
-            zh_CN="用于表情标签语义匹配的 embedding 模型。",
-            en_US="Embedding model used for semantic matching of emoji labels.",
-        ),
-    ).model_dump(),
+            ref_model_groups=True,
+            model_type="embedding",
+            i18n_title=i18n_text(
+                zh_CN="系统表情嵌入模型",
+                en_US="System Emoji Embedding Model",
+            ),
+            i18n_description=i18n_text(
+                zh_CN="用于表情标签语义匹配的 embedding 模型。",
+                en_US="Embedding model used for semantic matching of emoji labels.",
+            ),
+        ).model_dump(),
     )
     SYSTEM_EMOJI_HOST_DIR: str = Field(
         default=str(_CURRENT_RUNTIME_EMOJI_DIR),
@@ -1597,15 +1611,17 @@ class CoreConfig(ConfigBase):
         title="系统语音嵌入模型",
         description="用于 guidance 匹配的 embedding 模型。",
         json_schema_extra=ExtraField(
-        i18n_title=i18n_text(
-            zh_CN="系统语音嵌入模型",
-            en_US="System Voice Embedding Model",
-        ),
-        i18n_description=i18n_text(
-            zh_CN="用于 guidance 匹配的 embedding 模型。",
-            en_US="Embedding model used for guidance matching.",
-        ),
-    ).model_dump(),
+            ref_model_groups=True,
+            model_type="embedding",
+            i18n_title=i18n_text(
+                zh_CN="系统语音嵌入模型",
+                en_US="System Voice Embedding Model",
+            ),
+            i18n_description=i18n_text(
+                zh_CN="用于 guidance 匹配的 embedding 模型。",
+                en_US="Embedding model used for guidance matching.",
+            ),
+        ).model_dump(),
     )
     SYSTEM_VOICE_API_KEY: str = Field(
         default="",
