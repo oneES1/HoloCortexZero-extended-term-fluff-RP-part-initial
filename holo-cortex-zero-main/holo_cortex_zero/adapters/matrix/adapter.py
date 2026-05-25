@@ -235,6 +235,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 nio.RoomMessageFile,
                 nio.RoomMessageAudio,
                 nio.RoomMessageVideo,
+                nio.StickerEvent,
                 nio.RoomEncryptedImage,
                 nio.RoomEncryptedFile,
                 nio.RoomEncryptedAudio,
@@ -478,6 +479,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 nio.RoomMessageFile,
                 nio.RoomMessageAudio,
                 nio.RoomMessageVideo,
+                nio.StickerEvent,
                 nio.RoomEncryptedImage,
                 nio.RoomEncryptedFile,
                 nio.RoomEncryptedAudio,
@@ -912,7 +914,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         msgtype = str(content.get("msgtype") or "")
         if msgtype:
             return msgtype
-        if isinstance(event, (nio.RoomMessageImage, nio.RoomEncryptedImage)):
+        if isinstance(event, (nio.RoomMessageImage, nio.RoomEncryptedImage, nio.StickerEvent)):
             return "m.image"
         if isinstance(event, (nio.RoomMessageAudio, nio.RoomEncryptedAudio)):
             return "m.audio"
