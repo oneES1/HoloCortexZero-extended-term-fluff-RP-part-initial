@@ -67,7 +67,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         self._room_map: Dict[str, str] = {}
         self._pending_join_routes: Dict[str, tuple[MatrixRoomRoute, str, int]] = {}
         self._processed_event_ids: set[str] = set()
-        self._pending_megolm_events: Dict[str, tuple[str, str, nio.MegolmEvent]] = {}
+        self._pending_megolm_events: Dict[str, nio.MegolmEvent] = {}
         self._stopping: bool = False
 
     @property
@@ -125,8 +125,8 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             await self._bootstrap_sync_token()
             self._sync_task = asyncio.create_task(self._sync_supervisor(), name="matrix-nio-sync-supervisor")
             logger.info("Matrix SDK 适配器初始化成功")
-        except Exception as exc:
-            logger.error(f"Matrix SDK 适配器初始化失败: {exc.__class__.__name__}")
+        except Exception:
+            logger.exception("Matrix SDK 适配器初始化失败")
             await self.cleanup()
             raise
 
@@ -187,11 +187,10 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 return PlatformSendResponse(success=True, message_id="empty")
 
             message_id = event_ids[-1]
-            sent_count = len(event_ids)
-            logger.info(f"Matrix SDK 消息发送成功: segments={len(request.segments)} sent_count={sent_count}")
+            logger.info(f"Matrix SDK 消息发送成功: segments={len(request.segments)} events={len(event_ids)}")
             return PlatformSendResponse(success=True, message_id=message_id)
         except Exception as exc:
-            logger.error(f"Matrix SDK 消息发送失败: {exc.__class__.__name__}")
+            logger.error(f"Matrix SDK 消息发送失败: {exc.__class__.__name__}", exc_info=True)
             return PlatformSendResponse(success=False, error_message="Matrix SDK 消息发送失败")
 
     async def get_self_info(self) -> PlatformUser:
@@ -245,7 +244,6 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         client.add_event_callback(self._on_megolm_event, nio.MegolmEvent)
         client.add_event_callback(self._on_invite_event, nio.InviteMemberEvent)
         client.add_to_device_callback(self._on_room_key_event, (nio.RoomKeyEvent, nio.ForwardedRoomKeyEvent))
-        client.add_to_device_callback(self._on_room_key_request, nio.RoomKeyRequest)
         client.add_response_callback(self._on_sync_response, nio.SyncResponse)
 
     async def _login_sdk_client(self) -> None:
@@ -258,7 +256,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 raise RuntimeError("Matrix SDK access_token whoami 验证失败")
             if str(whoami.user_id or "").strip() != self._bot_user_id():
                 raise RuntimeError("Matrix SDK access_token user 不匹配")
-            logger.info("Matrix SDK whoami 验证成功")
+            logger.info("Matrix SDK access_token whoami 验证成功")
             return
         if not self.config.BOT_PASSWORD:
             raise RuntimeError("Matrix BOT_ACCESS_TOKEN 和 BOT_PASSWORD 均为空")
@@ -279,7 +277,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             set_presence="online",
         )
         if not isinstance(response, nio.SyncResponse):
-            raise RuntimeError(f"Matrix SDK bootstrap sync 失败: {response.__class__.__name__}")
+            raise RuntimeError(f"Matrix SDK bootstrap sync 失败: {response}")
         self._learn_sdk_rooms(prune=True)
         self._save_room_map()
         logger.info(f"Matrix SDK bootstrap sync 完成: rooms={len(client.rooms)}")
@@ -296,7 +294,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             except Exception as exc:
                 if self._stopping:
                     break
-                logger.error(f"Matrix SDK sync loop stopped: reason={exc.__class__.__name__} restart_in=5s")
+                logger.exception(f"Matrix SDK sync loop stopped: reason={exc.__class__.__name__} restart_in=5s")
             if not self._stopping:
                 await asyncio.sleep(5)
         logger.info("Matrix SDK sync supervisor 已停止")
@@ -312,7 +310,6 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
     async def _on_sync_response(self, response: nio.SyncResponse) -> None:  # noqa: ARG002
         self._learn_sdk_rooms(prune=True)
         self._save_room_map()
-        await self._retry_all_pending_megolm_events()
 
     async def _on_invite_event(self, room: nio.MatrixRoom, event: nio.InviteMemberEvent) -> None:
         client = self._require_client()
@@ -337,12 +334,10 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             return
         logger.warning(f"Matrix SDK 自动加入邀请失败: response={response.__class__.__name__}")
 
-    async def _on_megolm_event(self, room: nio.MatrixRoom, event: nio.MegolmEvent) -> None:
+    async def _on_megolm_event(self, _room: nio.MatrixRoom, event: nio.MegolmEvent) -> None:
         event_id = str(getattr(event, "event_id", "") or "").strip()
-        room_id = str(getattr(room, "room_id", "") or "").strip()
-        session_id = str(getattr(event, "session_id", "") or "").strip()
         if event_id:
-            self._pending_megolm_events[event_id] = (room_id, session_id, event)
+            self._pending_megolm_events[event_id] = event
             if len(self._pending_megolm_events) > 500:
                 self._pending_megolm_events = dict(list(self._pending_megolm_events.items())[-250:])
         try:
@@ -358,23 +353,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             room_id=str(getattr(event, "room_id", "") or ""),
             session_id=str(getattr(event, "session_id", "") or ""),
         )
-        if retried == 0:
-            retried = await self._retry_all_pending_megolm_events()
         logger.info(f"Matrix SDK E2EE room key 已接收，重试待解密消息数量={retried}")
-
-    async def _on_room_key_request(self, event: nio.RoomKeyRequest) -> None:
-        client = self._require_client()
-        room_id = str(getattr(event, "room_id", "") or "").strip()
-        if not room_id or self._sdk_room(room_id) is None:
-            return
-        if client.continue_key_share(event):
-            logger.info("Matrix SDK E2EE room key 请求已接受")
-
-    async def _retry_all_pending_megolm_events(self) -> int:
-        retried = 0
-        for room_id, session_id, _event in list(self._pending_megolm_events.values()):
-            retried += await self._retry_pending_megolm_events(room_id=room_id, session_id=session_id)
-        return retried
 
     async def _retry_pending_megolm_events(self, *, room_id: str, session_id: str) -> int:
         if not room_id or not session_id or not self._pending_megolm_events:
@@ -384,11 +363,10 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         if room is None:
             return 0
         retried = 0
-        for event_id, pending in list(self._pending_megolm_events.items()):
-            pending_room_id, pending_session_id, pending_event = pending
-            if pending_room_id != room_id:
+        for event_id, pending_event in list(self._pending_megolm_events.items()):
+            if str(getattr(pending_event, "room_id", "") or "") != room_id:
                 continue
-            if pending_session_id != session_id:
+            if str(getattr(pending_event, "session_id", "") or "") != session_id:
                 continue
             try:
                 decrypted_event = client.decrypt_event(pending_event)
@@ -508,9 +486,19 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         ):
             return segments
 
-        event_msgtype = self._event_msgtype(event)
-        declared_mime_type = self._event_mime_type(event) or "application/octet-stream"
-        attachment_kind = self._attachment_kind(msgtype=event_msgtype, mime_type=declared_mime_type)
+        media_bytes, mime_type = await self._download_event_media(event)
+        if not media_bytes:
+            return segments
+        max_bytes = max(1, int(config.MAX_UPLOAD_SIZE_MB or 10)) * 1024 * 1024
+        if len(media_bytes) > max_bytes:
+            logger.warning(
+                f"Matrix SDK 媒体下载后超过大小限制，已跳过落盘: bytes={len(media_bytes)} max={max_bytes}"
+            )
+            return segments
+
+        mime_type = mime_type or self._event_mime_type(event) or "application/octet-stream"
+        file_name = self._safe_media_filename(body=body, mime_type=mime_type, mxc_uri=str(getattr(event, "url", "") or ""), msgtype=self._event_msgtype(event))
+        attachment_kind = self._attachment_kind(msgtype=self._event_msgtype(event), mime_type=mime_type)
         is_voice_message = self._is_voice_message(content)
         ingest_mode, reason = resolve_incoming_attachment_mode(
             adapter_key=self.key,
@@ -524,22 +512,10 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         logger.info(
             f"Matrix SDK 附件接收策略: kind={attachment_kind} voice={is_voice_message} "
             f"encrypted={self._is_encrypted_media_event(event)} mode={ingest_mode} "
-            f"reason={reason}"
+            f"reason={reason} bytes={len(media_bytes)}"
         )
         if ingest_mode == "disabled":
             return segments
-        media_bytes, mime_type = await self._download_event_media(event)
-        if not media_bytes:
-            return segments
-        max_bytes = max(1, int(config.MAX_UPLOAD_SIZE_MB or 10)) * 1024 * 1024
-        if len(media_bytes) > max_bytes:
-            logger.warning(
-                f"Matrix SDK 媒体下载后超过大小限制，已跳过落盘: bytes={len(media_bytes)} max={max_bytes}"
-            )
-            return segments
-
-        mime_type = mime_type or declared_mime_type
-        file_name = self._safe_media_filename(body=body, mime_type=mime_type, mxc_uri=str(getattr(event, "url", "") or ""), msgtype=event_msgtype)
         segment_cls = ChatMessageSegmentImage if attachment_kind == "image" else ChatMessageSegmentFile
         segment = await segment_cls.create_from_bytes(
             media_bytes,
@@ -555,7 +531,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         client = self._require_client()
         mxc_uri = str(getattr(event, "url", "") or "").strip()
         if not mxc_uri.startswith("mxc://"):
-            logger.warning("Matrix SDK 媒体消息缺少下载地址")
+            logger.warning("Matrix SDK 媒体消息缺少 mxc url")
             return b"", ""
         response = await client.download(mxc=mxc_uri)
         if not isinstance(response, nio.MemoryDownloadResponse):
@@ -601,7 +577,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 filesize=file_size,
             )
         if not isinstance(upload_response, nio.UploadResponse):
-            raise RuntimeError(f"Matrix media upload failed: {upload_response.__class__.__name__}")
+            raise RuntimeError(f"Matrix media upload failed: {upload_response}")
 
         if segment.type == PlatformSendSegmentType.IMAGE:
             msgtype = "m.image"
@@ -640,7 +616,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         )
         if isinstance(response, nio.RoomSendResponse):
             return response
-        raise RuntimeError(f"Matrix room_send failed: {response.__class__.__name__}")
+        raise RuntimeError(f"Matrix room_send failed: {response}")
 
     async def _build_reference_segment_from_event(
         self,
@@ -804,13 +780,15 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         has_name_or_alias = self._room_has_name_or_alias(room)
         if self.is_primary_advanced_platform_user(inviter) and not has_name_or_alias:
             logger.info(
-                "Matrix SDK owner 邀请未携带 is_direct=true 且无 name/alias，按高级私聊邀请处理"
+                f"Matrix SDK owner 邀请未携带 is_direct=true 且无 name/alias，按高级私聊邀请处理: "
+                f"room_id={room.room_id} inviter={inviter}"
             )
             return True
         if has_name_or_alias:
             return False
         logger.info(
-            "Matrix SDK 邀请未携带 is_direct=true，按群聊/未知邀请处理"
+            f"Matrix SDK 邀请未携带 is_direct=true，按群聊/未知邀请处理: "
+            f"room_id={room.room_id} inviter={inviter}"
         )
         return False
 
@@ -1059,8 +1037,8 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 room_map = data.get("room_map", data)
                 if isinstance(room_map, dict):
                     self._room_map = {str(k): str(v) for k, v in room_map.items() if str(k) and str(v)}
-        except Exception as exc:
-            logger.warning(f"Matrix room map 加载失败: {exc.__class__.__name__}")
+        except Exception:
+            logger.exception(f"Matrix room map 加载失败: {path}")
             self._room_map = {}
 
     def _save_room_map(self) -> None:
@@ -1071,5 +1049,5 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 json.dumps({"room_map": self._room_map}, ensure_ascii=False, indent=2, sort_keys=True),
                 encoding="utf-8",
             )
-        except Exception as exc:
-            logger.warning(f"Matrix room map 保存失败: {exc.__class__.__name__}")
+        except Exception:
+            logger.exception(f"Matrix room map 保存失败: {path}")
