@@ -24,7 +24,14 @@ collect_message -> push_human_message -> bot reply
 
 - 在 Matrix 未解密事件回调中调用 SDK 的通用 `request_room_key(event)`。
 - 对已请求过的 room key 做幂等处理，避免重复请求异常影响同步循环。
+- 启动登录后立即检查并上传 E2EE device keys，避免等到后续 sync loop 才发布设备密钥。
+- 对缺 key 的外部发送者，额外向原发送设备发送一次受控 room key 请求。
+- 同一 session 的补钥匙请求做 60 秒内存节流，避免重复未解密事件刷屏请求。
 - 常驻日志改为脱敏描述，不记录 room、sender、event、session 等 Matrix 标识。
+
+## 追加验证
+
+后续运行态出现“room key 已请求过但仍跳过当前未解密事件”，说明只请求同账号设备不能闭合外部发送者场景。Matrix 发送端若在加密会话建立时没有把 bot 当前设备包含进去，bot 仍然拿不到该 Megolm session。追加修复后，适配器会同时保证本端 device keys 尽早发布，并向原发送设备发起补钥匙请求。
 
 ## 验证
 

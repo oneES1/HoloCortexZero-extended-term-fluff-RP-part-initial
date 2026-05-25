@@ -67,6 +67,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         self._room_map: Dict[str, str] = {}
         self._pending_join_routes: Dict[str, tuple[MatrixRoomRoute, str, int]] = {}
         self._processed_event_ids: set[str] = set()
+        self._room_key_request_at: Dict[str, float] = {}
         self._stopping: bool = False
 
     @property
@@ -121,6 +122,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
 
         try:
             await self._login_sdk_client()
+            await self._bootstrap_e2ee_keys()
             await self._bootstrap_sync_token()
             self._sync_task = asyncio.create_task(self._sync_supervisor(), name="matrix-nio-sync-supervisor")
             logger.info(
@@ -277,6 +279,20 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             return
         raise RuntimeError(f"Matrix SDK 登录失败: {response}")
 
+    async def _bootstrap_e2ee_keys(self) -> None:
+        client = self._require_client()
+        if not getattr(client, "olm", None):
+            logger.warning("Matrix SDK E2EE store 未加载，跳过 device key bootstrap")
+            return
+        if not client.should_upload_keys:
+            logger.info("Matrix SDK E2EE device keys 已处于已发布状态")
+            return
+        response = await client.keys_upload()
+        if not isinstance(response, nio.KeysUploadResponse):
+            logger.warning(f"Matrix SDK E2EE device keys 上传失败: {response.__class__.__name__}")
+            return
+        logger.info("Matrix SDK E2EE device keys 上传完成")
+
     async def _bootstrap_sync_token(self) -> None:
         client = self._require_client()
         response = await client.sync(
@@ -348,13 +364,46 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
 
     async def _on_megolm_event(self, _room: nio.MatrixRoom, event: nio.MegolmEvent) -> None:
         client = self._require_client()
+        session_id = str(getattr(event, "session_id", "") or "").strip()
+        now = time.monotonic()
+        if session_id:
+            last_request_at = self._room_key_request_at.get(session_id, 0)
+            if now - last_request_at < 60:
+                logger.info("Matrix SDK E2EE room key 近期已请求过，继续跳过当前未解密事件")
+                return
+            self._room_key_request_at[session_id] = now
+            if len(self._room_key_request_at) > 1000:
+                cutoff = now - 3600
+                self._room_key_request_at = {
+                    key: value for key, value in self._room_key_request_at.items() if value >= cutoff
+                }
+
         try:
             await client.request_room_key(event)
-            logger.warning("Matrix SDK E2EE 解密失败或缺少 room key，已请求补发 room key 并跳过当前事件")
+            logger.warning("Matrix SDK E2EE 解密失败或缺少 room key，已请求同账号设备补发 room key 并跳过当前事件")
         except nio.LocalProtocolError:
-            logger.info("Matrix SDK E2EE room key 已请求过，继续跳过当前未解密事件")
+            logger.info("Matrix SDK E2EE 同账号 room key 已请求过")
         except Exception as exc:
-            logger.warning(f"Matrix SDK E2EE room key 请求失败，已跳过当前未解密事件: {exc.__class__.__name__}")
+            logger.warning(f"Matrix SDK E2EE 同账号 room key 请求失败: {exc.__class__.__name__}")
+
+        sender = str(getattr(event, "sender", "") or "").strip()
+        sender_device_id = str(getattr(event, "device_id", "") or "").strip()
+        if not sender or sender == self._bot_user_id():
+            logger.warning("Matrix SDK E2EE 缺少 room key，已跳过当前未解密事件")
+            return
+        try:
+            message = event.as_key_request(
+                sender,
+                client.device_id or self._device_id(),
+                device_id=sender_device_id or None,
+            )
+            response = await client.to_device(message)
+            if isinstance(response, nio.ToDeviceResponse):
+                logger.warning("Matrix SDK E2EE 已向发送设备请求补发 room key，已跳过当前事件")
+            else:
+                logger.warning(f"Matrix SDK E2EE 向发送设备请求 room key 失败: {response.__class__.__name__}")
+        except Exception as exc:
+            logger.warning(f"Matrix SDK E2EE 向发送设备请求 room key 异常: {exc.__class__.__name__}")
 
     async def _on_room_message(self, room: nio.MatrixRoom, event: Any) -> None:
         event_id = str(getattr(event, "event_id", "") or "").strip()
