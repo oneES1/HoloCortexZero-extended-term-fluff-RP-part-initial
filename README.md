@@ -508,6 +508,18 @@ Common adapter checkpoints:
 - Telegram：配置 `BOT_TOKEN`、`你的ID`，必要时填 `PROXY_URL`
 - Matrix：配置机器人账号/token/password 与 `你的ID`
 
+Matrix encryption boundary:
+
+- Matrix group chats should use unencrypted rooms.
+- Matrix encrypted group chats require each sending client to proactively share Megolm room keys with the Bot device. If a third-party client keeps using an old session, refuses to share keys with unverified devices, or does not answer cross-user key requests, the adapter cannot decrypt those messages by itself.
+- Matrix E2EE is currently experimental and intended only for advanced-user private chats. For normal-user groups, third-party groups, and production Matrix group chats, use unencrypted Matrix rooms.
+
+Matrix 加密边界：
+
+- Matrix 群聊请使用不加密房间。
+- Matrix 加密群聊依赖每个发送端客户端主动向 Bot 设备共享 Megolm room key。第三方客户端如果沿用旧 session、拒绝向未验证设备共享、或不响应跨用户 key request，适配器无法单方面解密该消息。
+- Matrix E2EE 当前仅作为实验性能力支持高级用户私聊。普通用户群聊、第三方群聊和生产 Matrix 群聊请使用未加密 Matrix 房间。
+
 For first access, it is recommended to first let the target platform account send one normal message to the bot so the system can create it. Then go to the **chat channels** list in monitoring to confirm the message can be stored; green means the message service is enabled.
 
 首次接入建议先让目标平台账号给 bot 发一条普通消息，让系统创建。然后到监控里的**聊天频道**列表确认消息可入库，绿色意味着打开了消息服务

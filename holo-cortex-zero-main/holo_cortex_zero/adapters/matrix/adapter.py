@@ -71,6 +71,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         self._pending_megolm_events: Dict[str, nio.MegolmEvent] = {}
         self._sender_room_key_request_at: Dict[str, float] = {}
         self._verification_started_at: Dict[str, float] = {}
+        self._dummy_session_sent_at: Dict[str, float] = {}
         self._stopping: bool = False
 
     @property
@@ -126,6 +127,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         try:
             await self._login_sdk_client()
             self._install_cross_user_room_key_acceptance()
+            await self._repair_e2ee_device_keys_if_needed()
             await self._upload_e2ee_keys_if_needed()
             await self._bootstrap_sync_token()
             self._sync_task = asyncio.create_task(self._sync_supervisor(), name="matrix-nio-sync-supervisor")
@@ -296,6 +298,54 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             return
         logger.warning(f"Matrix SDK E2EE device keys 上传失败: response={response.__class__.__name__}")
 
+    async def _repair_e2ee_device_keys_if_needed(self) -> None:
+        client = self._require_client()
+        olm = getattr(client, "olm", None)
+        if not olm:
+            return
+        local_keys = dict(getattr(olm.account, "identity_keys", {}) or {})
+        if not local_keys:
+            return
+        client.users_for_key_query.add(self._bot_user_id())
+        response = await client.keys_query()
+        if not isinstance(response, nio.KeysQueryResponse):
+            logger.warning(f"Matrix SDK E2EE device keys 查询失败: response={response.__class__.__name__}")
+            return
+
+        device_keys = response.device_keys.get(self._bot_user_id(), {}).get(self._device_id(), {})
+        server_keys = device_keys.get("keys", {}) if isinstance(device_keys, dict) else {}
+        curve_ok = server_keys.get(f"curve25519:{self._device_id()}") == local_keys.get("curve25519")
+        ed_ok = server_keys.get(f"ed25519:{self._device_id()}") == local_keys.get("ed25519")
+        if device_keys and curve_ok and ed_ok:
+            return
+
+        repair_response = await self._upload_e2ee_device_identity_keys()
+        if isinstance(repair_response, nio.KeysUploadResponse):
+            logger.warning("Matrix SDK E2EE device keys 已修复并重新上传")
+            return
+        logger.warning(f"Matrix SDK E2EE device keys 修复上传失败: response={repair_response.__class__.__name__}")
+
+    async def _upload_e2ee_device_identity_keys(self) -> Any:
+        client = self._require_client()
+        olm = getattr(client, "olm", None)
+        if not olm:
+            return None
+        device_id = self._device_id()
+        user_id = self._bot_user_id()
+        identity_keys = dict(getattr(olm.account, "identity_keys", {}) or {})
+        device_keys = {
+            "algorithms": list(getattr(olm, "_algorithms", [])),
+            "device_id": device_id,
+            "user_id": user_id,
+            "keys": {
+                f"curve25519:{device_id}": identity_keys.get("curve25519", ""),
+                f"ed25519:{device_id}": identity_keys.get("ed25519", ""),
+            },
+        }
+        device_keys["signatures"] = {user_id: {f"ed25519:{device_id}": olm.sign_json(device_keys)}}
+        method, path, data = nio.Api.keys_upload(client.access_token, {"device_keys": device_keys})
+        return await client._send(nio.KeysUploadResponse, method, path, data)
+
     def _install_cross_user_room_key_acceptance(self) -> None:
         client = self._require_client()
         olm = getattr(client, "olm", None)
@@ -339,9 +389,13 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 continue
             if str(getattr(pending_event, "room_id", "") or "") != str(getattr(event, "room_id", "") or ""):
                 continue
-            if str(getattr(pending_event, "sender", "") or "") != str(sender or ""):
-                continue
             if str(getattr(pending_event, "sender_key", "") or "") != forwarded_sender_key:
+                continue
+            room = self._sdk_room(str(getattr(event, "room_id", "") or ""))
+            if room is None or str(sender or "") not in getattr(room, "users", {}):
+                continue
+            device = client.device_store.device_from_sender_key(str(sender or ""), str(sender_key or ""))
+            if device is None or not (bool(getattr(device, "verified", False)) or bool(getattr(device, "ignored", False))):
                 continue
             return True
         return False
@@ -434,6 +488,9 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         sender_requested = await self._request_room_key_from_sender(event)
         if sender_requested:
             logger.warning("Matrix SDK E2EE 已向原始发送设备请求 room key")
+        room_device_requests = await self._request_room_key_from_room_devices(event)
+        if room_device_requests:
+            logger.warning(f"Matrix SDK E2EE 已向房间设备请求 room key 数量={room_device_requests}")
 
     async def _request_room_key_from_sender(self, event: nio.MegolmEvent) -> bool:
         client = self._require_client()
@@ -464,6 +521,43 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
 
         response = await client.to_device(message, tx_id=f"hcz-sender-room-key-{int(time.time() * 1000)}")
         return isinstance(response, nio.ToDeviceResponse)
+
+    async def _request_room_key_from_room_devices(self, event: nio.MegolmEvent) -> int:
+        client = self._require_client()
+        session_id = str(getattr(event, "session_id", "") or "").strip()
+        room_id = str(getattr(event, "room_id", "") or "").strip()
+        if not session_id or not room_id:
+            return 0
+        room = self._sdk_room(room_id)
+        if room is None:
+            return 0
+        try:
+            room_devices = client.room_devices(room_id)
+        except Exception:
+            return 0
+
+        sent = 0
+        now = time.monotonic()
+        requester_device = str(getattr(client, "device_id", "") or self._device_id())
+        for user_id, user_devices in room_devices.items():
+            for device_id in user_devices:
+                if str(user_id or "") == self._bot_user_id() and str(device_id or "") == requester_device:
+                    continue
+                request_key = f"room|{user_id}|{device_id}|{room_id}|{session_id}"
+                if now - self._sender_room_key_request_at.get(request_key, 0.0) < 60.0:
+                    continue
+                message = event.as_key_request(str(user_id), requester_device, device_id=str(device_id))
+                if getattr(client, "olm", None) and session_id not in client.outgoing_key_requests:
+                    key_request = OutgoingKeyRequest.from_message(message)
+                    client.outgoing_key_requests[key_request.request_id] = key_request
+                    if getattr(client.olm, "store", None):
+                        with contextlib.suppress(Exception):
+                            client.olm.store.add_outgoing_key_request(key_request)
+                response = await client.to_device(message, tx_id=f"hcz-room-room-key-{int(time.time() * 1000)}-{sent}")
+                if isinstance(response, nio.ToDeviceResponse):
+                    self._sender_room_key_request_at[request_key] = now
+                    sent += 1
+        return sent
 
     async def _on_room_key_event(self, event: nio.RoomKeyEvent) -> None:
         retried = await self._retry_pending_megolm_events(
@@ -510,6 +604,9 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         if trusted:
             logger.info(f"Matrix SDK E2EE 已信任房间设备数量={trusted}")
         await self._claim_missing_olm_sessions()
+        dummy_sent = self._queue_room_device_dummy_messages()
+        if dummy_sent:
+            logger.info(f"Matrix SDK E2EE 已发送 Olm dummy 消息数量={dummy_sent}")
         started = await self._start_room_device_verifications()
         if started:
             logger.info(f"Matrix SDK E2EE 已发起设备验证数量={started}")
@@ -529,6 +626,8 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 for device in user_devices.values():
                     if str(getattr(device, "id", "") or "") == self._device_id():
                         continue
+                    if bool(getattr(device, "verified", False)):
+                        continue
                     if client.verify_device(device):
                         trusted += 1
         return trusted
@@ -546,6 +645,38 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 continue
             with contextlib.suppress(Exception):
                 await client.keys_claim(missing_sessions)
+
+    def _queue_room_device_dummy_messages(self) -> int:
+        client = self._require_client()
+        olm = getattr(client, "olm", None)
+        if not olm:
+            return 0
+        now = time.monotonic()
+        queued = 0
+        for room in client.rooms.values():
+            if not bool(getattr(room, "encrypted", False)):
+                continue
+            try:
+                room_devices = client.room_devices(room.room_id)
+            except Exception:
+                continue
+            for user_id, user_devices in room_devices.items():
+                for device_id, device in user_devices.items():
+                    if str(device_id or "") == self._device_id():
+                        continue
+                    key = f"{user_id}|{device_id}"
+                    if now - self._dummy_session_sent_at.get(key, 0.0) < 3600.0:
+                        continue
+                    session = olm.session_store.get(getattr(device, "curve25519", ""))
+                    if session is None:
+                        continue
+                    try:
+                        olm._queue_dummy_message(session, device)
+                    except Exception:
+                        continue
+                    self._dummy_session_sent_at[key] = now
+                    queued += 1
+        return queued
 
     async def _start_room_device_verifications(self) -> int:
         client = self._require_client()

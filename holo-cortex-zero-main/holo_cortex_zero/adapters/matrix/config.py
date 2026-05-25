@@ -1,9 +1,12 @@
 """Matrix adapter config."""
 
+from pathlib import Path
+
 from pydantic import Field
 
 from holo_cortex_zero.adapters.interface.base import BaseAdapterConfig
 from holo_cortex_zero.core.core_utils import ExtraField
+from holo_cortex_zero.core.os_env import OsEnv
 from holo_cortex_zero.schemas.i18n import i18n_text
 
 
@@ -235,3 +238,6 @@ class MatrixConfig(BaseAdapterConfig):
         description="调试用，仅记录事件摘要，不记录完整消息体。",
         json_schema_extra=ExtraField(is_hidden=True).model_dump(),
     )
+
+
+MatrixConfig.set_config_file_path(Path(OsEnv.DATA_DIR) / "configs" / "matrix" / "config.yaml")
