@@ -29,6 +29,7 @@ except Exception:  # pragma: no cover
 _TRAILING_DIGITS_RE = re.compile(r"\d+$")
 _CONTROL_CHAR_RE = re.compile(r"[\u0000-\u0008\u000B\u000C\u000E-\u001F]")
 _WHITESPACE_RE = re.compile(r"\s+")
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".avif", ".heic", ".heif"}
 
 _DEFAULT_EMOJI_HOST_DIR = Path(OsEnv.WORKSPACE_ROOT) / "emoji"
 
@@ -98,6 +99,10 @@ class SystemEmojiService:
             logger.warning(f"system_emoji MIME 探测失败，回退扩展名猜测: path={file_path} err={e}")
         return mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
 
+    @staticmethod
+    def _is_image_resource(file_path: Path, mime_type: str) -> bool:
+        return mime_type.startswith("image/") or file_path.suffix.lower() in _IMAGE_SUFFIXES
+
     async def initialize_runtime(self) -> None:
         async with self._init_lock:
             if self._initialized:
@@ -118,6 +123,20 @@ class SystemEmojiService:
                 "system_emoji 运行时初始化完成: "
                 f"host_dir={self._host_dir} file_count={self._file_count} tags={len(self._tag_to_paths)}"
             )
+
+    def _ensure_host_dir_current(self) -> None:
+        current_host_dir = self._resolve_host_dir()
+        if current_host_dir == self._host_dir:
+            return
+
+        self._host_dir = current_host_dir
+        if self._host_dir.is_symlink():
+            self._host_dir.resolve().mkdir(parents=True, exist_ok=True)
+        elif self._host_dir.exists() and not self._host_dir.is_dir():
+            raise NotADirectoryError(f"system_emoji host_dir 不是目录: {self._host_dir}")
+        else:
+            self._host_dir.mkdir(parents=True, exist_ok=True)
+        self._refresh_index(reason="host_dir_changed")
 
     def _refresh_index(self, *, reason: str) -> None:
         files = self._iter_files()
@@ -152,20 +171,11 @@ class SystemEmojiService:
             return
 
         current_count = self._count_files()
-        if current_count == self._indexed_file_count:
-            self._file_count = current_count
-            self._dir_mtime_ns = current_mtime_ns
-            logger.info(
-                "system_emoji 检测到目录变动但文件数未变，按约定跳过重建: "
-                f"file_count={current_count} indexed_file_count={self._indexed_file_count} host_dir={self._host_dir}"
-            )
-            return
-
         logger.info(
-            "system_emoji 检测到文件数变化，开始重建内存索引: "
+            "system_emoji 检测到目录变化，开始重建内存索引: "
             f"indexed_file_count={self._indexed_file_count} new_count={current_count} host_dir={self._host_dir}"
         )
-        self._refresh_index(reason="file_count_changed")
+        self._refresh_index(reason="dir_changed")
 
     async def maybe_dispatch_reply(self, *, chat_key: str, text: str) -> EmojiDispatchResult:
         try:
@@ -179,6 +189,7 @@ class SystemEmojiService:
                 return EmojiDispatchResult(sent_with_emoji=False, reason="empty_text")
 
             async with self._dispatch_lock:
+                self._ensure_host_dir_current()
                 self._refresh_index_if_needed()
 
                 if not self._tag_to_paths:
@@ -228,7 +239,7 @@ class SystemEmojiService:
 
                 selected_path = random.choice(self._tag_to_paths[best_tag])
                 mime_type = self._detect_mime_type(selected_path)
-                segment_type = PlatformSendSegmentType.IMAGE if mime_type.startswith("image/") else PlatformSendSegmentType.FILE
+                segment_type = PlatformSendSegmentType.IMAGE if self._is_image_resource(selected_path, mime_type) else PlatformSendSegmentType.FILE
 
                 resource_response = await adapter.forward_message(
                     PlatformSendRequest(

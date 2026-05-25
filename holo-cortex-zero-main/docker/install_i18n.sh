@@ -124,6 +124,7 @@ seed_default_emoji_assets() {
     local workspace_dir
     local emoji_dir
     local emoji_count
+    local emoji_dir_exists=0
     local runtime_uid=${HCZ_RUNTIME_UID:-$(id -u)}
     local runtime_gid=${HCZ_RUNTIME_GID:-$(id -g)}
 
@@ -142,6 +143,10 @@ seed_default_emoji_assets() {
         *) emoji_dir="${DEPLOY_ROOT}/${workspace_dir}/emoji" ;;
     esac
 
+    if [ -d "$emoji_dir" ]; then
+        emoji_dir_exists=1
+    fi
+
     if ! mkdir -p "$emoji_dir" 2>/dev/null; then
         if command -v sudo >/dev/null 2>&1; then
             sudo mkdir -p "$emoji_dir" || return 1
@@ -151,8 +156,7 @@ seed_default_emoji_assets() {
         fi
     fi
 
-    emoji_count=$(find "$emoji_dir" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
-    if [ "$emoji_count" = "0" ]; then
+    if [ "$emoji_dir_exists" = "0" ]; then
         if ! cp -n "$seed_dir"/* "$emoji_dir"/ 2>/dev/null; then
             if command -v sudo >/dev/null 2>&1; then
                 sudo cp -n "$seed_dir"/* "$emoji_dir"/ || return 1
@@ -165,6 +169,7 @@ seed_default_emoji_assets() {
         find "$emoji_dir" -type f -exec chmod g+rw {} + 2>/dev/null || true
         echo "Initialized default emoji assets / 已初始化默认 emoji 资源: $emoji_dir"
     else
+        emoji_count=$(find "$emoji_dir" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
         echo "Emoji dir already has ${emoji_count} file(s), skip seed / emoji 目录已有 ${emoji_count} 个文件，跳过默认资源初始化: $emoji_dir"
     fi
 }
