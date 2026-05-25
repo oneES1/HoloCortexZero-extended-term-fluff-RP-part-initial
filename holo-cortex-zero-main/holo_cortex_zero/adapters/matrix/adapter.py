@@ -508,19 +508,9 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         ):
             return segments
 
-        media_bytes, mime_type = await self._download_event_media(event)
-        if not media_bytes:
-            return segments
-        max_bytes = max(1, int(config.MAX_UPLOAD_SIZE_MB or 10)) * 1024 * 1024
-        if len(media_bytes) > max_bytes:
-            logger.warning(
-                f"Matrix SDK 媒体下载后超过大小限制，已跳过落盘: bytes={len(media_bytes)} max={max_bytes}"
-            )
-            return segments
-
-        mime_type = mime_type or self._event_mime_type(event) or "application/octet-stream"
-        file_name = self._safe_media_filename(body=body, mime_type=mime_type, mxc_uri=str(getattr(event, "url", "") or ""), msgtype=self._event_msgtype(event))
-        attachment_kind = self._attachment_kind(msgtype=self._event_msgtype(event), mime_type=mime_type)
+        event_msgtype = self._event_msgtype(event)
+        declared_mime_type = self._event_mime_type(event) or "application/octet-stream"
+        attachment_kind = self._attachment_kind(msgtype=event_msgtype, mime_type=declared_mime_type)
         is_voice_message = self._is_voice_message(content)
         ingest_mode, reason = resolve_incoming_attachment_mode(
             adapter_key=self.key,
@@ -534,8 +524,22 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         logger.info(
             f"Matrix SDK 附件接收策略: kind={attachment_kind} voice={is_voice_message} "
             f"encrypted={self._is_encrypted_media_event(event)} mode={ingest_mode} "
-            f"reason={reason} bytes={len(media_bytes)}"
+            f"reason={reason}"
         )
+        if ingest_mode == "disabled":
+            return segments
+        media_bytes, mime_type = await self._download_event_media(event)
+        if not media_bytes:
+            return segments
+        max_bytes = max(1, int(config.MAX_UPLOAD_SIZE_MB or 10)) * 1024 * 1024
+        if len(media_bytes) > max_bytes:
+            logger.warning(
+                f"Matrix SDK 媒体下载后超过大小限制，已跳过落盘: bytes={len(media_bytes)} max={max_bytes}"
+            )
+            return segments
+
+        mime_type = mime_type or declared_mime_type
+        file_name = self._safe_media_filename(body=body, mime_type=mime_type, mxc_uri=str(getattr(event, "url", "") or ""), msgtype=event_msgtype)
         segment_cls = ChatMessageSegmentImage if attachment_kind == "image" else ChatMessageSegmentFile
         segment = await segment_cls.create_from_bytes(
             media_bytes,

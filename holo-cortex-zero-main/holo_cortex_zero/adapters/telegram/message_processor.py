@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, List, Any, Dict, Tuple
+from typing import TYPE_CHECKING, Optional, List, Tuple
 
 try:
     import magic
@@ -16,7 +16,7 @@ try:
 except ImportError:
     HAS_MAGIC = False
 
-from telegram import Update, Message, Document, PhotoSize, Video, Audio, Voice, VideoNote, Sticker
+from telegram import Update, Message
 from telegram.ext import ContextTypes
 
 if TYPE_CHECKING:
@@ -38,11 +38,9 @@ from holo_cortex_zero.schemas.chat_message import (
     ChatMessageSegmentType,
     ChatMessageSegmentImage,
     ChatMessageSegmentFile,
-    ChatMessageSegmentAt,
     build_reference_segment,
     extract_primary_reference_segment,
 )
-from holo_cortex_zero.tools.common_util import download_file_from_bytes
 
 
 class MessageProcessor:
@@ -110,6 +108,9 @@ class MessageProcessor:
 
         # 处理消息内容
         content_segments = await self._process_message_content(message)
+        if not content_segments:
+            logger.info("Telegram update 未接入: reason=empty_content")
+            return
         
         # 构造平台消息
         platform_message = PlatformMessage(
@@ -161,22 +162,21 @@ class MessageProcessor:
         if message.photo:
             # 选择最大尺寸的照片
             largest_photo = max(message.photo, key=lambda p: p.file_size or 0)
+            attachment_ingest_mode, attachment_reason = self._resolve_attachment_ingest_mode(
+                message,
+                chat_key=chat_key,
+                effective_sender_id=effective_sender_id,
+                attachment_kind="image",
+            )
+            logger.info(f"Telegram 附件接收策略: kind=image mode={attachment_ingest_mode} reason={attachment_reason}")
+            if attachment_ingest_mode == "disabled":
+                return segments
             photo_bytes = await self._download_file_bytes(largest_photo.file_id)
             if photo_bytes:
                 # 智能检测文件类型
                 mime_type, extension = self._detect_file_type_and_extension(photo_bytes)
                 safe_id = self._sanitize_filename(largest_photo.file_id)
                 filename = f"photo_{safe_id}{extension or '.jpg'}"
-                attachment_ingest_mode, attachment_reason = resolve_incoming_attachment_mode(
-                    adapter_key=self.adapter.key,
-                    chat_key=chat_key,
-                    chat_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                    sender_id=effective_sender_id,
-                    platform_userid=effective_sender_id,
-                    attachment_kind="image",
-                    channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                )
-                logger.info(f"Telegram 附件接收策略: kind=image mode={attachment_ingest_mode} reason={attachment_reason}")
                 
                 segment = await ChatMessageSegmentImage.create_from_bytes(
                     photo_bytes,
@@ -189,6 +189,16 @@ class MessageProcessor:
 
         # 处理文档
         if message.document:
+            attachment_kind = self._document_attachment_kind(message.document)
+            attachment_ingest_mode, attachment_reason = self._resolve_attachment_ingest_mode(
+                message,
+                chat_key=chat_key,
+                effective_sender_id=effective_sender_id,
+                attachment_kind=attachment_kind,
+            )
+            logger.info(f"Telegram 附件接收策略: kind={attachment_kind} mode={attachment_ingest_mode} reason={attachment_reason}")
+            if attachment_ingest_mode == "disabled":
+                return segments
             doc_bytes = await self._download_file_bytes(message.document.file_id)
             if doc_bytes:
                 # 智能检测文件类型
@@ -208,17 +218,6 @@ class MessageProcessor:
                 except Exception:
                     orig_ext = ""
                 use_ext = extension or orig_ext or ".bin"
-                attachment_kind = "image" if str(mime_type or "").startswith("image/") else "file"
-                attachment_ingest_mode, attachment_reason = resolve_incoming_attachment_mode(
-                    adapter_key=self.adapter.key,
-                    chat_key=chat_key,
-                    chat_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                    sender_id=effective_sender_id,
-                    platform_userid=effective_sender_id,
-                    attachment_kind=attachment_kind,
-                    channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                )
-                logger.info(f"Telegram 附件接收策略: kind={attachment_kind} mode={attachment_ingest_mode} reason={attachment_reason}")
                 media_exts = {
                     ".mp3", ".wav", ".ogg", ".oga", ".m4a", ".flac", ".aac", ".opus", ".webm", ".amr", ".silk", ".pcm", ".caf",
                     ".mp4", ".mov", ".mkv", ".avi",
@@ -230,8 +229,9 @@ class MessageProcessor:
                     filename = orig_name
                 else:
                     filename = f"document_{safe_id}{use_ext}"
-                
-                segment = await ChatMessageSegmentFile.create_from_bytes(
+
+                segment_cls = ChatMessageSegmentImage if attachment_kind == "image" else ChatMessageSegmentFile
+                segment = await segment_cls.create_from_bytes(
                     doc_bytes,
                     from_chat_key=chat_key,
                     file_name=filename,
@@ -242,22 +242,21 @@ class MessageProcessor:
 
         # 处理视频
         if message.video:
+            attachment_ingest_mode, attachment_reason = self._resolve_attachment_ingest_mode(
+                message,
+                chat_key=chat_key,
+                effective_sender_id=effective_sender_id,
+                attachment_kind="video",
+            )
+            logger.info(f"Telegram 附件接收策略: kind=video mode={attachment_ingest_mode} reason={attachment_reason}")
+            if attachment_ingest_mode == "disabled":
+                return segments
             video_bytes = await self._download_file_bytes(message.video.file_id)
             if video_bytes:
                 # 智能检测文件类型
                 mime_type, extension = self._detect_file_type_and_extension(video_bytes)
                 safe_id = self._sanitize_filename(message.video.file_id)
                 filename = f"video_{safe_id}{extension or '.mp4'}"
-                attachment_ingest_mode, attachment_reason = resolve_incoming_attachment_mode(
-                    adapter_key=self.adapter.key,
-                    chat_key=chat_key,
-                    chat_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                    sender_id=effective_sender_id,
-                    platform_userid=effective_sender_id,
-                    attachment_kind="video",
-                    channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                )
-                logger.info(f"Telegram 附件接收策略: kind=video mode={attachment_ingest_mode} reason={attachment_reason}")
                 
                 segment = await ChatMessageSegmentFile.create_from_bytes(
                     video_bytes,
@@ -270,6 +269,15 @@ class MessageProcessor:
 
         # 处理音频
         if message.audio:
+            attachment_ingest_mode, attachment_reason = self._resolve_attachment_ingest_mode(
+                message,
+                chat_key=chat_key,
+                effective_sender_id=effective_sender_id,
+                attachment_kind="audio",
+            )
+            logger.info(f"Telegram 附件接收策略: kind=audio mode={attachment_ingest_mode} reason={attachment_reason}")
+            if attachment_ingest_mode == "disabled":
+                return segments
             audio_bytes = await self._download_file_bytes(message.audio.file_id)
             if audio_bytes:
                 # 智能检测文件类型
@@ -287,16 +295,6 @@ class MessageProcessor:
                     orig_ext = ""
                 use_ext = extension or orig_ext or ".mp3"
                 filename = f"audio_{safe_id}{use_ext}"
-                attachment_ingest_mode, attachment_reason = resolve_incoming_attachment_mode(
-                    adapter_key=self.adapter.key,
-                    chat_key=chat_key,
-                    chat_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                    sender_id=effective_sender_id,
-                    platform_userid=effective_sender_id,
-                    attachment_kind="audio",
-                    channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                )
-                logger.info(f"Telegram 附件接收策略: kind=audio mode={attachment_ingest_mode} reason={attachment_reason}")
                 
                 segment = await ChatMessageSegmentFile.create_from_bytes(
                     audio_bytes,
@@ -309,22 +307,21 @@ class MessageProcessor:
 
         # 处理语音
         if message.voice:
+            attachment_ingest_mode, attachment_reason = self._resolve_attachment_ingest_mode(
+                message,
+                chat_key=chat_key,
+                effective_sender_id=effective_sender_id,
+                attachment_kind="audio",
+            )
+            logger.info(f"Telegram 附件接收策略: kind=audio mode={attachment_ingest_mode} reason={attachment_reason}")
+            if attachment_ingest_mode == "disabled":
+                return segments
             voice_bytes = await self._download_file_bytes(message.voice.file_id)
             if voice_bytes:
                 # 智能检测文件类型
                 mime_type, extension = self._detect_file_type_and_extension(voice_bytes)
                 safe_id = self._sanitize_filename(message.voice.file_id)
                 filename = f"voice_{safe_id}{extension or '.ogg'}"
-                attachment_ingest_mode, attachment_reason = resolve_incoming_attachment_mode(
-                    adapter_key=self.adapter.key,
-                    chat_key=chat_key,
-                    chat_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                    sender_id=effective_sender_id,
-                    platform_userid=effective_sender_id,
-                    attachment_kind="audio",
-                    channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                )
-                logger.info(f"Telegram 附件接收策略: kind=audio mode={attachment_ingest_mode} reason={attachment_reason}")
                 
                 segment = await ChatMessageSegmentFile.create_from_bytes(
                     voice_bytes,
@@ -337,11 +334,21 @@ class MessageProcessor:
 
         # 处理贴纸
         if message.sticker:
+            is_animated = bool(getattr(message.sticker, "is_animated", False))
+            is_video = bool(getattr(message.sticker, "is_video", False))
+            sticker_kind = "video" if is_video else "file" if is_animated else "image"
+            attachment_ingest_mode, attachment_reason = self._resolve_attachment_ingest_mode(
+                message,
+                chat_key=chat_key,
+                effective_sender_id=effective_sender_id,
+                attachment_kind=sticker_kind,
+            )
+            logger.info(f"Telegram 附件接收策略: kind={sticker_kind} mode={attachment_ingest_mode} reason={attachment_reason}")
+            if attachment_ingest_mode == "disabled":
+                return segments
             sticker_bytes = await self._download_file_bytes(message.sticker.file_id)
             if sticker_bytes:
                 safe_id = self._sanitize_filename(message.sticker.file_id)
-                is_animated = bool(getattr(message.sticker, "is_animated", False))
-                is_video = bool(getattr(message.sticker, "is_video", False))
 
                 # 智能检测文件类型
                 mime_type, extension = self._detect_file_type_and_extension(sticker_bytes)
@@ -356,16 +363,6 @@ class MessageProcessor:
                 if normalized_sticker:
                     normalized_bytes, normalized_ext = normalized_sticker
                     filename = f"sticker_{safe_id}{normalized_ext}"
-                    attachment_ingest_mode, attachment_reason = resolve_incoming_attachment_mode(
-                        adapter_key=self.adapter.key,
-                        chat_key=chat_key,
-                        chat_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                        sender_id=effective_sender_id,
-                        platform_userid=effective_sender_id,
-                        attachment_kind="image",
-                        channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                    )
-                    logger.info(f"Telegram 附件接收策略: kind=image mode={attachment_ingest_mode} reason={attachment_reason}")
                     segment = await ChatMessageSegmentImage.create_from_bytes(
                         normalized_bytes,
                         from_chat_key=chat_key,
@@ -376,16 +373,6 @@ class MessageProcessor:
                 else:
                     fallback_ext = extension or (".webm" if is_video else ".tgs" if is_animated else ".webp")
                     filename = f"sticker_{safe_id}{fallback_ext}"
-                    attachment_ingest_mode, attachment_reason = resolve_incoming_attachment_mode(
-                        adapter_key=self.adapter.key,
-                        chat_key=chat_key,
-                        chat_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                        sender_id=effective_sender_id,
-                        platform_userid=effective_sender_id,
-                        attachment_kind="file",
-                        channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                    )
-                    logger.info(f"Telegram 附件接收策略: kind=file mode={attachment_ingest_mode} reason={attachment_reason}")
                     segment = await ChatMessageSegmentFile.create_from_bytes(
                         sticker_bytes,
                         from_chat_key=chat_key,
@@ -397,22 +384,21 @@ class MessageProcessor:
 
         # 处理视频笔记
         if message.video_note:
+            attachment_ingest_mode, attachment_reason = self._resolve_attachment_ingest_mode(
+                message,
+                chat_key=chat_key,
+                effective_sender_id=effective_sender_id,
+                attachment_kind="video",
+            )
+            logger.info(f"Telegram 附件接收策略: kind=video mode={attachment_ingest_mode} reason={attachment_reason}")
+            if attachment_ingest_mode == "disabled":
+                return segments
             video_note_bytes = await self._download_file_bytes(message.video_note.file_id)
             if video_note_bytes:
                 # 智能检测文件类型
                 mime_type, extension = self._detect_file_type_and_extension(video_note_bytes)
                 safe_id = self._sanitize_filename(message.video_note.file_id)
                 filename = f"video_note_{safe_id}{extension or '.mp4'}"
-                attachment_ingest_mode, attachment_reason = resolve_incoming_attachment_mode(
-                    adapter_key=self.adapter.key,
-                    chat_key=chat_key,
-                    chat_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                    sender_id=effective_sender_id,
-                    platform_userid=effective_sender_id,
-                    attachment_kind="video",
-                    channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
-                )
-                logger.info(f"Telegram 附件接收策略: kind=video mode={attachment_ingest_mode} reason={attachment_reason}")
                 
                 segment = await ChatMessageSegmentFile.create_from_bytes(
                     video_note_bytes,
@@ -424,6 +410,39 @@ class MessageProcessor:
                 segments.append(segment)
 
         return segments
+
+    def _resolve_attachment_ingest_mode(
+        self,
+        message: Message,
+        *,
+        chat_key: str,
+        effective_sender_id: str,
+        attachment_kind: str,
+    ):
+        chat_type = ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value
+        return resolve_incoming_attachment_mode(
+            adapter_key=self.adapter.key,
+            chat_key=chat_key,
+            chat_type=chat_type,
+            sender_id=effective_sender_id,
+            platform_userid=effective_sender_id,
+            attachment_kind=attachment_kind,
+            channel_type=chat_type,
+        )
+
+    def _document_attachment_kind(self, document) -> str:
+        mime_type = str(getattr(document, "mime_type", "") or "").lower()
+        file_name = str(getattr(document, "file_name", "") or "")
+        extension = Path(file_name).suffix.lower() if file_name else ""
+        if mime_type.startswith("image/") or extension in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff"}:
+            return "image"
+        if mime_type.startswith("audio/") or extension in {
+            ".mp3", ".wav", ".ogg", ".oga", ".m4a", ".flac", ".aac", ".opus", ".amr", ".silk", ".pcm", ".caf",
+        }:
+            return "audio"
+        if mime_type.startswith("video/") or extension in {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}:
+            return "video"
+        return "file"
 
     def _sanitize_filename(self, file_id: str) -> str:
         """清理文件 ID 用于文件名（移除非法字符）"""
@@ -736,6 +755,8 @@ class MessageProcessor:
         sender_chat = getattr(message, "sender_chat", None)
         if sender_chat:
             return sender_chat
+        if getattr(message, "from_user", None):
+            return None
         chat = getattr(message, "chat", None)
         if str(getattr(chat, "type", "") or "") in {"group", "supergroup", "channel"}:
             return chat
