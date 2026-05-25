@@ -229,6 +229,9 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             self._on_room_message,
             (
                 nio.RoomMessageText,
+                nio.RoomMessageNotice,
+                nio.RoomMessageEmote,
+                nio.RoomMessageUnknown,
                 nio.RoomMessageImage,
                 nio.RoomMessageFile,
                 nio.RoomMessageAudio,
@@ -485,7 +488,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
 
         content = self._event_content(event)
         body = self._strip_reply_fallback(str(getattr(event, "body", "") or content.get("body") or "")).strip()
-        if isinstance(event, nio.RoomMessageText):
+        if isinstance(event, (nio.RoomMessageText, nio.RoomMessageNotice, nio.RoomMessageEmote, nio.RoomMessageUnknown)):
             if body:
                 segments.append(ChatMessageSegment(type=ChatMessageSegmentType.TEXT, text=body))
             return segments
