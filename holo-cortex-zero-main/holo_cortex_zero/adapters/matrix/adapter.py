@@ -67,7 +67,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         self._room_map: Dict[str, str] = {}
         self._pending_join_routes: Dict[str, tuple[MatrixRoomRoute, str, int]] = {}
         self._processed_event_ids: set[str] = set()
-        self._pending_megolm_events: Dict[str, nio.MegolmEvent] = {}
+        self._pending_megolm_events: Dict[str, tuple[str, str, nio.MegolmEvent]] = {}
         self._stopping: bool = False
 
     @property
@@ -125,8 +125,8 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             await self._bootstrap_sync_token()
             self._sync_task = asyncio.create_task(self._sync_supervisor(), name="matrix-nio-sync-supervisor")
             logger.info("Matrix SDK 适配器初始化成功")
-        except Exception:
-            logger.exception("Matrix SDK 适配器初始化失败")
+        except Exception as exc:
+            logger.error(f"Matrix SDK 适配器初始化失败: {exc.__class__.__name__}")
             await self.cleanup()
             raise
 
@@ -187,10 +187,11 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 return PlatformSendResponse(success=True, message_id="empty")
 
             message_id = event_ids[-1]
-            logger.info(f"Matrix SDK 消息发送成功: segments={len(request.segments)} events={len(event_ids)}")
+            sent_count = len(event_ids)
+            logger.info(f"Matrix SDK 消息发送成功: segments={len(request.segments)} sent_count={sent_count}")
             return PlatformSendResponse(success=True, message_id=message_id)
         except Exception as exc:
-            logger.error(f"Matrix SDK 消息发送失败: {exc.__class__.__name__}", exc_info=True)
+            logger.error(f"Matrix SDK 消息发送失败: {exc.__class__.__name__}")
             return PlatformSendResponse(success=False, error_message="Matrix SDK 消息发送失败")
 
     async def get_self_info(self) -> PlatformUser:
@@ -253,7 +254,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 raise RuntimeError("Matrix SDK access_token whoami 验证失败")
             if str(whoami.user_id or "").strip() != self._bot_user_id():
                 raise RuntimeError("Matrix SDK access_token user 不匹配")
-            logger.info("Matrix SDK access_token whoami 验证成功")
+            logger.info("Matrix SDK whoami 验证成功")
             return
         if not self.config.BOT_PASSWORD:
             raise RuntimeError("Matrix BOT_ACCESS_TOKEN 和 BOT_PASSWORD 均为空")
@@ -274,7 +275,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             set_presence="online",
         )
         if not isinstance(response, nio.SyncResponse):
-            raise RuntimeError(f"Matrix SDK bootstrap sync 失败: {response}")
+            raise RuntimeError(f"Matrix SDK bootstrap sync 失败: {response.__class__.__name__}")
         self._learn_sdk_rooms(prune=True)
         self._save_room_map()
         logger.info(f"Matrix SDK bootstrap sync 完成: rooms={len(client.rooms)}")
@@ -291,7 +292,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             except Exception as exc:
                 if self._stopping:
                     break
-                logger.exception(f"Matrix SDK sync loop stopped: reason={exc.__class__.__name__} restart_in=5s")
+                logger.error(f"Matrix SDK sync loop stopped: reason={exc.__class__.__name__} restart_in=5s")
             if not self._stopping:
                 await asyncio.sleep(5)
         logger.info("Matrix SDK sync supervisor 已停止")
@@ -331,10 +332,12 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             return
         logger.warning(f"Matrix SDK 自动加入邀请失败: response={response.__class__.__name__}")
 
-    async def _on_megolm_event(self, _room: nio.MatrixRoom, event: nio.MegolmEvent) -> None:
+    async def _on_megolm_event(self, room: nio.MatrixRoom, event: nio.MegolmEvent) -> None:
         event_id = str(getattr(event, "event_id", "") or "").strip()
+        room_id = str(getattr(room, "room_id", "") or "").strip()
+        session_id = str(getattr(event, "session_id", "") or "").strip()
         if event_id:
-            self._pending_megolm_events[event_id] = event
+            self._pending_megolm_events[event_id] = (room_id, session_id, event)
             if len(self._pending_megolm_events) > 500:
                 self._pending_megolm_events = dict(list(self._pending_megolm_events.items())[-250:])
         try:
@@ -360,10 +363,11 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         if room is None:
             return 0
         retried = 0
-        for event_id, pending_event in list(self._pending_megolm_events.items()):
-            if str(getattr(pending_event, "room_id", "") or "") != room_id:
+        for event_id, pending in list(self._pending_megolm_events.items()):
+            pending_room_id, pending_session_id, pending_event = pending
+            if pending_room_id != room_id:
                 continue
-            if str(getattr(pending_event, "session_id", "") or "") != session_id:
+            if pending_session_id != session_id:
                 continue
             try:
                 decrypted_event = client.decrypt_event(pending_event)
@@ -526,7 +530,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         client = self._require_client()
         mxc_uri = str(getattr(event, "url", "") or "").strip()
         if not mxc_uri.startswith("mxc://"):
-            logger.warning("Matrix SDK 媒体消息缺少 mxc url")
+            logger.warning("Matrix SDK 媒体消息缺少下载地址")
             return b"", ""
         response = await client.download(mxc=mxc_uri)
         if not isinstance(response, nio.MemoryDownloadResponse):
@@ -572,7 +576,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 filesize=file_size,
             )
         if not isinstance(upload_response, nio.UploadResponse):
-            raise RuntimeError(f"Matrix media upload failed: {upload_response}")
+            raise RuntimeError(f"Matrix media upload failed: {upload_response.__class__.__name__}")
 
         if segment.type == PlatformSendSegmentType.IMAGE:
             msgtype = "m.image"
@@ -611,7 +615,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         )
         if isinstance(response, nio.RoomSendResponse):
             return response
-        raise RuntimeError(f"Matrix room_send failed: {response}")
+        raise RuntimeError(f"Matrix room_send failed: {response.__class__.__name__}")
 
     async def _build_reference_segment_from_event(
         self,
@@ -775,15 +779,13 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         has_name_or_alias = self._room_has_name_or_alias(room)
         if self.is_primary_advanced_platform_user(inviter) and not has_name_or_alias:
             logger.info(
-                f"Matrix SDK owner 邀请未携带 is_direct=true 且无 name/alias，按高级私聊邀请处理: "
-                f"room_id={room.room_id} inviter={inviter}"
+                "Matrix SDK owner 邀请未携带 is_direct=true 且无 name/alias，按高级私聊邀请处理"
             )
             return True
         if has_name_or_alias:
             return False
         logger.info(
-            f"Matrix SDK 邀请未携带 is_direct=true，按群聊/未知邀请处理: "
-            f"room_id={room.room_id} inviter={inviter}"
+            "Matrix SDK 邀请未携带 is_direct=true，按群聊/未知邀请处理"
         )
         return False
 
@@ -1032,8 +1034,8 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 room_map = data.get("room_map", data)
                 if isinstance(room_map, dict):
                     self._room_map = {str(k): str(v) for k, v in room_map.items() if str(k) and str(v)}
-        except Exception:
-            logger.exception(f"Matrix room map 加载失败: {path}")
+        except Exception as exc:
+            logger.warning(f"Matrix room map 加载失败: {exc.__class__.__name__}")
             self._room_map = {}
 
     def _save_room_map(self) -> None:
@@ -1044,5 +1046,5 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
                 json.dumps({"room_map": self._room_map}, ensure_ascii=False, indent=2, sort_keys=True),
                 encoding="utf-8",
             )
-        except Exception:
-            logger.exception(f"Matrix room map 保存失败: {path}")
+        except Exception as exc:
+            logger.warning(f"Matrix room map 保存失败: {exc.__class__.__name__}")

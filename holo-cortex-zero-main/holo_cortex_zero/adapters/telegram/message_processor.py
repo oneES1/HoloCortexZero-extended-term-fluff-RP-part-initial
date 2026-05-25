@@ -58,25 +58,31 @@ class MessageProcessor:
                 await self._handle_message(update.message, context)
             elif update.edited_message:
                 await self._handle_edited_message(update.edited_message, context)
+            elif update.channel_post:
+                await self._handle_message(update.channel_post, context)
+            elif update.edited_channel_post:
+                await self._handle_edited_message(update.edited_channel_post, context)
             # 可以添加更多类型的处理，如 inline_query, callback_query 等
         except Exception as e:
-            logger.error(f"处理 Telegram 更新时出错: {e}")
+            logger.error(f"处理 Telegram 更新时出错: {e.__class__.__name__}")
 
     async def _handle_message(self, message: Message, context: ContextTypes.DEFAULT_TYPE = None) -> None:
         """处理消息"""
-        if not message.from_user:
+        sender_user = getattr(message, "from_user", None)
+        sender_chat = self._get_effective_sender_chat(message)
+        if not sender_user and message.chat.type == "private":
+            return
+        if not sender_user and not sender_chat:
             return
         if message.chat.type == "private" and not self.adapter.config.AUTO_ACCEPT_PRIVATE_CHAT:
-            logger.info(
-                f"Telegram 私聊 update 未接入: chat_id={message.chat.id} user_id={message.from_user.id} "
-                "reason=private_chat_disabled"
-            )
+            logger.info("Telegram 私聊 update 未接入: reason=private_chat_disabled")
             return
 
         # 获取用户真实昵称和显示名称
-        user_display_name, user_nickname = await self._get_user_display_info(
-            message.from_user, message.chat
-        )
+        if sender_user:
+            user_display_name, user_nickname = await self._get_user_display_info(sender_user, message.chat)
+        else:
+            user_display_name, user_nickname = self._get_sender_chat_display_info(sender_chat)
 
         raw_user_id, raw_sender_name, raw_sender_nickname = self._get_effective_sender_profile(
             message,
@@ -115,7 +121,7 @@ class MessageProcessor:
             content_text=self._extract_text_content(content_segments),
             content_data=content_segments,
             sender_nickname=raw_sender_nickname,
-            is_self=message.from_user.id == context.bot.id if context and context.bot else False,
+            is_self=bool(sender_user and context and context.bot and sender_user.id == context.bot.id),
             is_tome=self._is_mentioned(message, context),
             ext_data=self._build_reference_ext(content_segments, self.adapter.build_chat_key(message.chat)),
         )
@@ -172,9 +178,7 @@ class MessageProcessor:
                     attachment_kind="image",
                     channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
                 )
-                logger.info(
-                    f"Telegram 附件接收策略: chat_key={chat_key} sender={effective_sender_id} kind=image mode={attachment_ingest_mode} reason={attachment_reason}",
-                )
+                logger.info(f"Telegram 附件接收策略: kind=image mode={attachment_ingest_mode} reason={attachment_reason}")
                 
                 segment = await ChatMessageSegmentImage.create_from_bytes(
                     photo_bytes,
@@ -216,9 +220,7 @@ class MessageProcessor:
                     attachment_kind=attachment_kind,
                     channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
                 )
-                logger.info(
-                    f"Telegram 附件接收策略: chat_key={chat_key} sender={effective_sender_id} kind={attachment_kind} mode={attachment_ingest_mode} reason={attachment_reason}",
-                )
+                logger.info(f"Telegram 附件接收策略: kind={attachment_kind} mode={attachment_ingest_mode} reason={attachment_reason}")
                 media_exts = {
                     ".mp3", ".wav", ".ogg", ".oga", ".m4a", ".flac", ".aac", ".opus", ".webm", ".amr", ".silk", ".pcm", ".caf",
                     ".mp4", ".mov", ".mkv", ".avi",
@@ -257,9 +259,7 @@ class MessageProcessor:
                     attachment_kind="video",
                     channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
                 )
-                logger.info(
-                    f"Telegram 附件接收策略: chat_key={chat_key} sender={effective_sender_id} kind=video mode={attachment_ingest_mode} reason={attachment_reason}",
-                )
+                logger.info(f"Telegram 附件接收策略: kind=video mode={attachment_ingest_mode} reason={attachment_reason}")
                 
                 segment = await ChatMessageSegmentFile.create_from_bytes(
                     video_bytes,
@@ -298,9 +298,7 @@ class MessageProcessor:
                     attachment_kind="audio",
                     channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
                 )
-                logger.info(
-                    f"Telegram 附件接收策略: chat_key={chat_key} sender={effective_sender_id} kind=audio mode={attachment_ingest_mode} reason={attachment_reason}",
-                )
+                logger.info(f"Telegram 附件接收策略: kind=audio mode={attachment_ingest_mode} reason={attachment_reason}")
                 
                 segment = await ChatMessageSegmentFile.create_from_bytes(
                     audio_bytes,
@@ -328,9 +326,7 @@ class MessageProcessor:
                     attachment_kind="audio",
                     channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
                 )
-                logger.info(
-                    f"Telegram 附件接收策略: chat_key={chat_key} sender={effective_sender_id} kind=audio mode={attachment_ingest_mode} reason={attachment_reason}",
-                )
+                logger.info(f"Telegram 附件接收策略: kind=audio mode={attachment_ingest_mode} reason={attachment_reason}")
                 
                 segment = await ChatMessageSegmentFile.create_from_bytes(
                     voice_bytes,
@@ -371,9 +367,7 @@ class MessageProcessor:
                         attachment_kind="image",
                         channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
                     )
-                    logger.info(
-                        f"Telegram 附件接收策略: chat_key={chat_key} sender={effective_sender_id} kind=image mode={attachment_ingest_mode} reason={attachment_reason}",
-                    )
+                    logger.info(f"Telegram 附件接收策略: kind=image mode={attachment_ingest_mode} reason={attachment_reason}")
                     segment = await ChatMessageSegmentImage.create_from_bytes(
                         normalized_bytes,
                         from_chat_key=chat_key,
@@ -393,9 +387,7 @@ class MessageProcessor:
                         attachment_kind="file",
                         channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
                     )
-                    logger.info(
-                        f"Telegram 附件接收策略: chat_key={chat_key} sender={effective_sender_id} kind=file mode={attachment_ingest_mode} reason={attachment_reason}",
-                    )
+                    logger.info(f"Telegram 附件接收策略: kind=file mode={attachment_ingest_mode} reason={attachment_reason}")
                     segment = await ChatMessageSegmentFile.create_from_bytes(
                         sticker_bytes,
                         from_chat_key=chat_key,
@@ -422,9 +414,7 @@ class MessageProcessor:
                     attachment_kind="video",
                     channel_type=ChatType.PRIVATE.value if message.chat.type == "private" else ChatType.GROUP.value,
                 )
-                logger.info(
-                    f"Telegram 附件接收策略: chat_key={chat_key} sender={effective_sender_id} kind=video mode={attachment_ingest_mode} reason={attachment_reason}",
-                )
+                logger.info(f"Telegram 附件接收策略: kind=video mode={attachment_ingest_mode} reason={attachment_reason}")
                 
                 segment = await ChatMessageSegmentFile.create_from_bytes(
                     video_note_bytes,
@@ -457,7 +447,7 @@ class MessageProcessor:
             file_bytes = await file.download_as_bytearray()
             return bytes(file_bytes)
         except Exception as e:
-            logger.error(f"下载文件失败 {file_id}: {e}")
+            logger.error(f"Telegram 文件下载失败: {e.__class__.__name__}")
             return None
 
     def _detect_file_type_and_extension(self, file_bytes: bytes, original_filename: Optional[str] = None) -> tuple[str, str]:
@@ -497,7 +487,7 @@ class MessageProcessor:
                 }
                 extension = mime_to_ext.get(mime_type, "")
             except Exception as e:
-                logger.debug(f"Magic 库检测文件类型失败: {e}")
+                logger.debug(f"Magic 库检测文件类型失败: {e.__class__.__name__}")
         
         # 如果 magic 库未检测出扩展名，尝试从原始文件名获取
         if not extension and original_filename:
@@ -546,7 +536,7 @@ class MessageProcessor:
             if ffmpeg_png:
                 return ffmpeg_png, ".png"
 
-        logger.warning(f"贴纸转换为 PNG 失败，降级为文件段: mime={normalized_mime}, ext={normalized_ext}")
+        logger.warning("贴纸转换为 PNG 失败，降级为文件段")
         return None
 
     def _convert_image_bytes_to_png(self, image_bytes: bytes) -> Optional[bytes]:
@@ -614,13 +604,22 @@ class MessageProcessor:
         display_name: str = "",
         nickname: str = "",
     ) -> tuple[str, str, str]:
-        effective_user_id = str(getattr(getattr(message, "from_user", None), "id", "") or "")
+        sender_user = getattr(message, "from_user", None)
+        if sender_user:
+            effective_user_id = str(getattr(sender_user, "id", "") or "")
+            effective_sender_name = display_name or effective_user_id
+            effective_sender_nickname = nickname or effective_sender_name
+            return effective_user_id, effective_sender_name, effective_sender_nickname
+
+        sender_chat = self._get_effective_sender_chat(message)
+        sender_chat_id = str(getattr(sender_chat, "id", "") or "").strip()
+        effective_user_id = f"sender_chat_{sender_chat_id}" if sender_chat_id else ""
         effective_sender_name = display_name or effective_user_id
         effective_sender_nickname = nickname or effective_sender_name
         return effective_user_id, effective_sender_name, effective_sender_nickname
 
     def _preview_canonical_attachment_identity(self, message: Message) -> tuple[str, str]:
-        raw_user_id = str(getattr(getattr(message, "from_user", None), "id", "") or "").strip()
+        raw_user_id, _, _ = self._get_effective_sender_profile(message)
         raw_channel_id = self.adapter._get_channel_id(message.chat)
         channel_type = ChatType.PRIVATE if getattr(message.chat, "type", "") == "private" else ChatType.GROUP
         preview = preview_canonical_inbound_identity(
@@ -648,6 +647,10 @@ class MessageProcessor:
         ref_sender_nickname = ""
         if getattr(message, "from_user", None):
             ref_sender_name, ref_sender_nickname = await self._get_user_display_info(message.from_user, message.chat)
+        else:
+            ref_sender_name, ref_sender_nickname = self._get_sender_chat_display_info(
+                self._get_effective_sender_chat(message),
+            )
         ref_sender_id, effective_ref_name, _ = self._get_effective_sender_profile(
             message,
             ref_sender_name,
@@ -723,8 +726,26 @@ class MessageProcessor:
         # Telegram 的 message.from_user 已经包含了最新的用户信息
         # 没有必要额外调用 getChatMember API
         
-        logger.debug(f"获取用户信息: display_name={display_name}, nickname={full_nickname}")
+        logger.debug("Telegram 用户显示信息已解析")
         return display_name, full_nickname
+
+    def _get_effective_sender_chat(self, message: Message):
+        sender_chat = getattr(message, "sender_chat", None)
+        if sender_chat:
+            return sender_chat
+        chat = getattr(message, "chat", None)
+        if str(getattr(chat, "type", "") or "") in {"group", "supergroup", "channel"}:
+            return chat
+        return None
+
+    def _get_sender_chat_display_info(self, sender_chat) -> tuple[str, str]:
+        sender_name = str(
+            getattr(sender_chat, "title", "")
+            or getattr(sender_chat, "username", "")
+            or getattr(sender_chat, "id", "")
+            or "Telegram sender"
+        ).strip()
+        return sender_name, sender_name
     
     async def _get_channel_display_name(self, chat) -> str:
         """获取频道/群聊的显示名称"""

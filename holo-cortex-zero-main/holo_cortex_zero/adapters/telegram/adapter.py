@@ -178,10 +178,6 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
         }
 
     @staticmethod
-    def _safe_error_text(error: Exception) -> str:
-        return str(error).replace("\n", "\\n")
-
-    @staticmethod
     def _is_transient_send_error(error: Exception) -> bool:
         err_text = str(error).lower()
         err_cls = error.__class__.__name__.lower()
@@ -211,19 +207,18 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
                 result = await send_call()
                 elapsed_ms = (time.monotonic() - started_at) * 1000.0
                 logger.info(
-                    f"[telegram_send] chat_key={chat_key} segment_type={segment_type} segment_len={segment_len} "
+                    f"[telegram_send] segment_type={segment_type} segment_len={segment_len} "
                     f"attempt={attempt} is_retry={is_retry} elapsed_ms={elapsed_ms:.1f} "
-                    f"error_class=none error_text=",
+                    f"error_class=none",
                 )
                 return result
             except Exception as error:
                 elapsed_ms = (time.monotonic() - started_at) * 1000.0
                 error_class = error.__class__.__name__
-                error_text = self._safe_error_text(error)
                 logger.warning(
-                    f"[telegram_send] chat_key={chat_key} segment_type={segment_type} segment_len={segment_len} "
+                    f"[telegram_send] segment_type={segment_type} segment_len={segment_len} "
                     f"attempt={attempt} is_retry={is_retry} elapsed_ms={elapsed_ms:.1f} "
-                    f"error_class={error_class} error_text={error_text}",
+                    f"error_class={error_class}",
                 )
                 if attempt >= max_attempts or not self._is_transient_send_error(error):
                     raise
@@ -238,14 +233,13 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
             return
 
         proxy_url, proxy_source = self._effective_proxy_url()
-        proxy_mask = "<none>" if not proxy_url else proxy_url
         init_attempts = 3
 
         for attempt in range(1, init_attempts + 1):
             application: Optional[Application] = None
             try:
                 logger.info(
-                    f"Telegram 适配器初始化 attempt={attempt}/{init_attempts} proxy_source={proxy_source} proxy={proxy_mask}"
+                    f"Telegram 适配器初始化 attempt={attempt}/{init_attempts} proxy_source={proxy_source}"
                 )
                 builder = Application.builder().token(self.config.BOT_TOKEN)
                 builder = builder.request(self._build_httpx_request(proxy_url=proxy_url, read_timeout=20.0))
@@ -269,7 +263,7 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
                 return
 
             except Exception as e:
-                logger.error(f"Telegram 适配器初始化失败 attempt={attempt}/{init_attempts}: {e}")
+                logger.error(f"Telegram 适配器初始化失败 attempt={attempt}/{init_attempts}: {e.__class__.__name__}")
                 if application is not None:
                     with contextlib.suppress(Exception):
                         if application.updater:
@@ -294,7 +288,7 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
                 # 成功启动后重置重试计数
                 self._polling_retries = 0
         except Exception as e:
-            logger.error(f"Telegram 轮询启动失败: {e}")
+            logger.error(f"Telegram 轮询启动失败: {e.__class__.__name__}")
             raise
 
     async def _start_polling_with_retry(self) -> None:
@@ -308,7 +302,7 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
                 if self._polling_retries < self._max_polling_retries:
                     logger.warning(
                         f"Telegram 轮询启动失败，第 {self._polling_retries} 次重试，"
-                        f"{self._polling_retry_delay} 秒后重试: {e}"
+                        f"{self._polling_retry_delay} 秒后重试: {e.__class__.__name__}"
                     )
                     await asyncio.sleep(self._polling_retry_delay)
                 else:
@@ -339,7 +333,7 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
 
             logger.info("Telegram 适配器已清理")
         except Exception as e:
-            logger.error(f"Telegram 适配器清理失败: {e}")
+            logger.error(f"Telegram 适配器清理失败: {e.__class__.__name__}")
 
     async def forward_message(
         self,
@@ -555,9 +549,8 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
             )
 
         except Exception as e:
-            error_msg = f"Telegram 消息发送失败: {e!s}"
-            logger.error(error_msg)
-            return PlatformSendResponse(success=False, error_message=error_msg)
+            logger.error(f"Telegram 消息发送失败: {e.__class__.__name__}")
+            return PlatformSendResponse(success=False, error_message="Telegram 消息发送失败")
 
     async def edit_message(self, chat_key: str, message_id: str, text: str) -> PlatformSendResponse:
         """编辑已发送消息（用于流式可见输出）"""
@@ -571,7 +564,7 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
         try:
             msg_id = int(str(message_id).split(",")[0])
         except Exception:
-            return PlatformSendResponse(success=False, error_message=f"无效的 message_id: {message_id}")
+            return PlatformSendResponse(success=False, error_message="无效的 message_id")
 
         try:
             msg = await bot.edit_message_text(
@@ -599,10 +592,10 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
                         text=text or "…",
                     )
                     return PlatformSendResponse(success=True, message_id=str(getattr(msg, "message_id", msg_id)))
-                except Exception as retry_e:
-                    return PlatformSendResponse(success=False, error_message=f"Telegram 编辑消息失败(重试后): {retry_e}")
+                except Exception:
+                    return PlatformSendResponse(success=False, error_message="Telegram 编辑消息失败(重试后)")
 
-            return PlatformSendResponse(success=False, error_message=f"Telegram 编辑消息失败: {e}")
+            return PlatformSendResponse(success=False, error_message="Telegram 编辑消息失败")
 
     async def delete_message(self, chat_key: str, message_id: str) -> bool:
         """删除已发送消息（用于流式占位清理）"""
@@ -695,7 +688,7 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
                 user_avatar="",
             )
         except Exception as e:
-            logger.error(f"获取用户信息失败: {e}")
+            logger.error(f"获取用户信息失败: {e.__class__.__name__}")
             # 返回默认用户信息
             return PlatformUser(
                 platform_name=self.key,
@@ -737,7 +730,7 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
                 channel_type=chat_type,
             )
         except Exception as e:
-            logger.error(f"获取频道信息失败: {e}")
+            logger.error(f"获取频道信息失败: {e.__class__.__name__}")
             # 返回默认频道信息
             chat_type = ChatType.PRIVATE if "private" in channel_id else ChatType.GROUP
             return PlatformChannel(
