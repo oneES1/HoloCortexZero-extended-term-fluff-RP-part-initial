@@ -68,6 +68,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         self._pending_join_routes: Dict[str, tuple[MatrixRoomRoute, str, int]] = {}
         self._processed_event_ids: set[str] = set()
         self._pending_megolm_events: Dict[str, nio.MegolmEvent] = {}
+        self._room_key_request_refresh_at: Dict[str, float] = {}
         self._stopping: bool = False
 
     @property
@@ -361,9 +362,41 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             await self._require_client().request_room_key(event)
             logger.warning("Matrix SDK E2EE 消息缺少 room key，已请求补钥匙并缓存等待重试")
         except nio.LocalProtocolError:
-            logger.info("Matrix SDK E2EE 消息缺少 room key，补钥匙请求已存在，继续缓存等待重试")
+            refreshed = await self._refresh_room_key_request(event)
+            if refreshed:
+                logger.warning("Matrix SDK E2EE room key 旧请求已刷新，继续缓存等待重试")
+            else:
+                logger.info("Matrix SDK E2EE 消息缺少 room key，补钥匙请求已存在，继续缓存等待重试")
         except Exception as exc:
             logger.warning(f"Matrix SDK E2EE 补钥匙请求失败，已缓存等待后续重试: {exc.__class__.__name__}")
+
+    async def _refresh_room_key_request(self, event: nio.MegolmEvent) -> bool:
+        client = self._require_client()
+        session_id = str(getattr(event, "session_id", "") or "")
+        room_id = str(getattr(event, "room_id", "") or "")
+        if not session_id:
+            return False
+        request_key = f"{room_id}|{session_id}"
+        now = time.monotonic()
+        if now - self._room_key_request_refresh_at.get(request_key, 0.0) < 30.0:
+            return False
+
+        removed = False
+        for key, key_request in list(client.outgoing_key_requests.items()):
+            if key != session_id and str(getattr(key_request, "session_id", "") or "") != session_id:
+                continue
+            client.outgoing_key_requests.pop(key, None)
+            if getattr(client, "olm", None) and getattr(client.olm, "store", None):
+                with contextlib.suppress(Exception):
+                    client.olm.store.remove_outgoing_key_request(key_request)
+            removed = True
+
+        if not removed:
+            return False
+
+        self._room_key_request_refresh_at[request_key] = now
+        response = await client.request_room_key(event, tx_id=f"hcz-room-key-request-{int(time.time() * 1000)}")
+        return isinstance(response, nio.RoomKeyRequestResponse)
 
     async def _on_room_key_event(self, event: nio.RoomKeyEvent) -> None:
         retried = await self._retry_pending_megolm_events(
