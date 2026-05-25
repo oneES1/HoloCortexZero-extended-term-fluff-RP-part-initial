@@ -70,6 +70,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         self._processed_event_ids: set[str] = set()
         self._pending_megolm_events: Dict[str, nio.MegolmEvent] = {}
         self._sender_room_key_request_at: Dict[str, float] = {}
+        self._verification_started_at: Dict[str, float] = {}
         self._stopping: bool = False
 
     @property
@@ -249,6 +250,16 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         client.add_event_callback(self._on_megolm_event, nio.MegolmEvent)
         client.add_event_callback(self._on_invite_event, nio.InviteMemberEvent)
         client.add_to_device_callback(self._on_room_key_event, (nio.RoomKeyEvent, nio.ForwardedRoomKeyEvent))
+        client.add_to_device_callback(
+            self._on_key_verification_event,
+            (
+                nio.KeyVerificationStart,
+                nio.KeyVerificationAccept,
+                nio.KeyVerificationKey,
+                nio.KeyVerificationMac,
+                nio.KeyVerificationCancel,
+            ),
+        )
         client.add_response_callback(self._on_sync_response, nio.SyncResponse)
 
     async def _login_sdk_client(self) -> None:
@@ -347,6 +358,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             raise RuntimeError(f"Matrix SDK bootstrap sync 失败: {response}")
         self._learn_sdk_rooms(prune=True)
         self._save_room_map()
+        await self._converge_e2ee_state()
         logger.info(f"Matrix SDK bootstrap sync 完成: rooms={len(client.rooms)}")
 
     async def _sync_supervisor(self) -> None:
@@ -377,6 +389,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
     async def _on_sync_response(self, response: nio.SyncResponse) -> None:  # noqa: ARG002
         self._learn_sdk_rooms(prune=True)
         self._save_room_map()
+        await self._converge_e2ee_state()
         retried = await self._retry_pending_megolm_events()
         if retried:
             logger.info(f"Matrix SDK E2EE sync 后重试待解密消息数量={retried}")
@@ -399,6 +412,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             self._pending_join_routes[room.room_id] = (route, inviter, 2)
             self._learn_sdk_rooms(prune=True)
             self._save_room_map()
+            await self._converge_e2ee_state()
             invite_kind = "私聊" if is_private_invite else "群聊"
             logger.info(f"Matrix SDK 已自动加入{invite_kind}邀请")
             return
@@ -457,6 +471,114 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             session_id=str(getattr(event, "session_id", "") or ""),
         )
         logger.info(f"Matrix SDK E2EE room key 已接收，重试待解密消息数量={retried}")
+
+    async def _on_key_verification_event(self, event: nio.KeyVerificationEvent) -> None:
+        transaction_id = str(getattr(event, "transaction_id", "") or "")
+        if not transaction_id:
+            return
+        client = self._require_client()
+        try:
+            if isinstance(event, nio.KeyVerificationStart):
+                await client.accept_key_verification(transaction_id)
+                logger.info("Matrix SDK E2EE 设备验证请求已自动接受")
+            elif isinstance(event, nio.KeyVerificationKey):
+                await self._flush_to_device_messages()
+                message = client.confirm_key_verification(transaction_id)
+                await client.to_device(message)
+                logger.info("Matrix SDK E2EE 设备验证 SAS 已自动确认")
+            elif isinstance(event, nio.KeyVerificationAccept):
+                await self._flush_to_device_messages()
+            elif isinstance(event, nio.KeyVerificationMac):
+                sas = client.key_verifications.get(transaction_id) if getattr(client, "olm", None) else None
+                if sas is not None and getattr(sas, "verified", False):
+                    logger.info("Matrix SDK E2EE 设备验证已完成")
+            await self._flush_to_device_messages()
+        except nio.LocalProtocolError as exc:
+            logger.info(f"Matrix SDK E2EE 设备验证状态跳过: {exc.__class__.__name__}")
+        except Exception as exc:
+            logger.warning(f"Matrix SDK E2EE 设备验证处理失败: {exc.__class__.__name__}")
+
+    async def _converge_e2ee_state(self) -> None:
+        client = self._require_client()
+        if not getattr(client, "olm", None):
+            return
+        await self._upload_e2ee_keys_if_needed()
+        with contextlib.suppress(Exception):
+            if bool(getattr(client, "should_query_keys", False)):
+                await client.keys_query()
+        trusted = self._trust_room_devices()
+        if trusted:
+            logger.info(f"Matrix SDK E2EE 已信任房间设备数量={trusted}")
+        await self._claim_missing_olm_sessions()
+        started = await self._start_room_device_verifications()
+        if started:
+            logger.info(f"Matrix SDK E2EE 已发起设备验证数量={started}")
+        await self._flush_to_device_messages()
+
+    def _trust_room_devices(self) -> int:
+        client = self._require_client()
+        trusted = 0
+        for room in client.rooms.values():
+            if not bool(getattr(room, "encrypted", False)):
+                continue
+            try:
+                room_devices = client.room_devices(room.room_id)
+            except Exception:
+                continue
+            for user_devices in room_devices.values():
+                for device in user_devices.values():
+                    if str(getattr(device, "id", "") or "") == self._device_id():
+                        continue
+                    if client.verify_device(device):
+                        trusted += 1
+        return trusted
+
+    async def _claim_missing_olm_sessions(self) -> None:
+        client = self._require_client()
+        for room in client.rooms.values():
+            if not bool(getattr(room, "encrypted", False)):
+                continue
+            try:
+                missing_sessions = client.get_missing_sessions(room.room_id)
+            except Exception:
+                continue
+            if not missing_sessions:
+                continue
+            with contextlib.suppress(Exception):
+                await client.keys_claim(missing_sessions)
+
+    async def _start_room_device_verifications(self) -> int:
+        client = self._require_client()
+        now = time.monotonic()
+        started = 0
+        for room in client.rooms.values():
+            if not bool(getattr(room, "encrypted", False)):
+                continue
+            try:
+                room_devices = client.room_devices(room.room_id)
+            except Exception:
+                continue
+            for user_id, user_devices in room_devices.items():
+                for device_id, device in user_devices.items():
+                    if str(device_id or "") == self._device_id():
+                        continue
+                    key = f"{user_id}|{device_id}"
+                    if now - self._verification_started_at.get(key, 0.0) < 3600.0:
+                        continue
+                    if client.get_active_sas(str(user_id), str(device_id)) is not None:
+                        continue
+                    try:
+                        await client.start_key_verification(device)
+                    except Exception:
+                        continue
+                    self._verification_started_at[key] = now
+                    started += 1
+        return started
+
+    async def _flush_to_device_messages(self) -> None:
+        client = self._require_client()
+        with contextlib.suppress(Exception):
+            await client.send_to_device_messages()
 
     async def _retry_pending_megolm_events(self, *, room_id: str = "", session_id: str = "") -> int:
         if not self._pending_megolm_events:
