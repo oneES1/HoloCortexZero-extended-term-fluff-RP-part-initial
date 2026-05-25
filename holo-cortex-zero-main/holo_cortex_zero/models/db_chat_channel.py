@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING
 from tortoise import fields
 from tortoise.models import Model
 
-from holo_cortex_zero.adapters.utils import adapter_utils
 from holo_cortex_zero.core import config
 from holo_cortex_zero.core.logger import logger
 from holo_cortex_zero.core.runtime_identity import get_bot_persona_display_name, get_primary_advanced_user_id
@@ -108,6 +107,8 @@ class DBChatChannel(Model):
     @property
     def adapter(self) -> "BaseAdapter":
         """获取适配器"""
+        from holo_cortex_zero.adapters.utils import adapter_utils
+
         return adapter_utils.get_adapter(self.adapter_key)
 
     @staticmethod
