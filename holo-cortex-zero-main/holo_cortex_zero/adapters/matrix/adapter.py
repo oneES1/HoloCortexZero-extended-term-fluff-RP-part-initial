@@ -122,6 +122,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
 
         try:
             await self._login_sdk_client()
+            await self._upload_e2ee_keys_if_needed()
             await self._bootstrap_sync_token()
             self._sync_task = asyncio.create_task(self._sync_supervisor(), name="matrix-nio-sync-supervisor")
             logger.info("Matrix SDK 适配器初始化成功")
@@ -269,6 +270,18 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             return
         raise RuntimeError(f"Matrix SDK 登录失败: {response.__class__.__name__}")
 
+    async def _upload_e2ee_keys_if_needed(self) -> None:
+        client = self._require_client()
+        if not getattr(client, "olm", None):
+            return
+        if not bool(getattr(client, "should_upload_keys", False)):
+            return
+        response = await client.keys_upload()
+        if isinstance(response, nio.KeysUploadResponse):
+            logger.info("Matrix SDK E2EE device keys 已上传")
+            return
+        logger.warning(f"Matrix SDK E2EE device keys 上传失败: response={response.__class__.__name__}")
+
     async def _bootstrap_sync_token(self) -> None:
         client = self._require_client()
         response = await client.sync(
@@ -311,6 +324,9 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
     async def _on_sync_response(self, response: nio.SyncResponse) -> None:  # noqa: ARG002
         self._learn_sdk_rooms(prune=True)
         self._save_room_map()
+        retried = await self._retry_pending_megolm_events()
+        if retried:
+            logger.info(f"Matrix SDK E2EE sync 后重试待解密消息数量={retried}")
 
     async def _on_invite_event(self, room: nio.MatrixRoom, event: nio.InviteMemberEvent) -> None:
         client = self._require_client()
@@ -356,18 +372,19 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         )
         logger.info(f"Matrix SDK E2EE room key 已接收，重试待解密消息数量={retried}")
 
-    async def _retry_pending_megolm_events(self, *, room_id: str, session_id: str) -> int:
-        if not room_id or not session_id or not self._pending_megolm_events:
+    async def _retry_pending_megolm_events(self, *, room_id: str = "", session_id: str = "") -> int:
+        if not self._pending_megolm_events:
             return 0
         client = self._require_client()
-        room = self._sdk_room(room_id)
-        if room is None:
-            return 0
         retried = 0
         for event_id, pending_event in list(self._pending_megolm_events.items()):
-            if str(getattr(pending_event, "room_id", "") or "") != room_id:
+            pending_room_id = str(getattr(pending_event, "room_id", "") or "")
+            if room_id and pending_room_id != room_id:
                 continue
-            if str(getattr(pending_event, "session_id", "") or "") != session_id:
+            if session_id and str(getattr(pending_event, "session_id", "") or "") != session_id:
+                continue
+            room = self._sdk_room(pending_room_id)
+            if room is None:
                 continue
             try:
                 decrypted_event = client.decrypt_event(pending_event)
