@@ -9,7 +9,7 @@ from pathlib import Path
 import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Optional, Tuple
 
-from telegram import Bot
+from telegram import Bot, Update
 from telegram.ext import Application, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
@@ -283,7 +283,7 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
         """启动轮询"""
         try:
             if self.application and self.application.updater:
-                await self.application.updater.start_polling()
+                await self.application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
                 logger.info("Telegram 轮询已启动")
                 # 成功启动后重置重试计数
                 self._polling_retries = 0

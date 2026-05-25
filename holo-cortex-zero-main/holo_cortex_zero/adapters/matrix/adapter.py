@@ -242,6 +242,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         client.add_event_callback(self._on_megolm_event, nio.MegolmEvent)
         client.add_event_callback(self._on_invite_event, nio.InviteMemberEvent)
         client.add_to_device_callback(self._on_room_key_event, (nio.RoomKeyEvent, nio.ForwardedRoomKeyEvent))
+        client.add_to_device_callback(self._on_room_key_request, nio.RoomKeyRequest)
         client.add_response_callback(self._on_sync_response, nio.SyncResponse)
 
     async def _login_sdk_client(self) -> None:
@@ -308,6 +309,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
     async def _on_sync_response(self, response: nio.SyncResponse) -> None:  # noqa: ARG002
         self._learn_sdk_rooms(prune=True)
         self._save_room_map()
+        await self._retry_all_pending_megolm_events()
 
     async def _on_invite_event(self, room: nio.MatrixRoom, event: nio.InviteMemberEvent) -> None:
         client = self._require_client()
@@ -353,7 +355,23 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             room_id=str(getattr(event, "room_id", "") or ""),
             session_id=str(getattr(event, "session_id", "") or ""),
         )
+        if retried == 0:
+            retried = await self._retry_all_pending_megolm_events()
         logger.info(f"Matrix SDK E2EE room key 已接收，重试待解密消息数量={retried}")
+
+    async def _on_room_key_request(self, event: nio.RoomKeyRequest) -> None:
+        client = self._require_client()
+        room_id = str(getattr(event, "room_id", "") or "").strip()
+        if not room_id or self._sdk_room(room_id) is None:
+            return
+        if client.continue_key_share(event):
+            logger.info("Matrix SDK E2EE room key 请求已接受")
+
+    async def _retry_all_pending_megolm_events(self) -> int:
+        retried = 0
+        for room_id, session_id, _event in list(self._pending_megolm_events.values()):
+            retried += await self._retry_pending_megolm_events(room_id=room_id, session_id=session_id)
+        return retried
 
     async def _retry_pending_megolm_events(self, *, room_id: str, session_id: str) -> int:
         if not room_id or not session_id or not self._pending_megolm_events:

@@ -62,6 +62,10 @@ class MessageProcessor:
                 await self._handle_message(update.channel_post, context)
             elif update.edited_channel_post:
                 await self._handle_edited_message(update.edited_channel_post, context)
+            elif getattr(update, "business_message", None):
+                await self._handle_message(update.business_message, context)
+            elif getattr(update, "edited_business_message", None):
+                await self._handle_edited_message(update.edited_business_message, context)
             # 可以添加更多类型的处理，如 inline_query, callback_query 等
         except Exception as e:
             logger.error(f"处理 Telegram 更新时出错: {e.__class__.__name__}")
