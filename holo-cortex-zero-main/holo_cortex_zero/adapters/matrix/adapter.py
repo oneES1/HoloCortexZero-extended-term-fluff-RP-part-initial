@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import nio
+from nio.crypto import OutgoingKeyRequest
 from nio.crypto.attachments import decrypt_attachment
 
 from holo_cortex_zero.adapters.interface.base import AdapterMetadata, BaseAdapter
@@ -68,6 +69,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         self._pending_join_routes: Dict[str, tuple[MatrixRoomRoute, str, int]] = {}
         self._processed_event_ids: set[str] = set()
         self._pending_megolm_events: Dict[str, nio.MegolmEvent] = {}
+        self._sender_room_key_request_at: Dict[str, float] = {}
         self._stopping: bool = False
 
     @property
@@ -122,6 +124,7 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
 
         try:
             await self._login_sdk_client()
+            self._install_cross_user_room_key_acceptance()
             await self._upload_e2ee_keys_if_needed()
             await self._bootstrap_sync_token()
             self._sync_task = asyncio.create_task(self._sync_supervisor(), name="matrix-nio-sync-supervisor")
@@ -282,6 +285,56 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             return
         logger.warning(f"Matrix SDK E2EE device keys 上传失败: response={response.__class__.__name__}")
 
+    def _install_cross_user_room_key_acceptance(self) -> None:
+        client = self._require_client()
+        olm = getattr(client, "olm", None)
+        if not olm or getattr(olm, "_hcz_cross_user_forward_acceptance", False):
+            return
+
+        original_should_accept_forward = olm._should_accept_forward
+
+        def should_accept_forward(sender: str, sender_key: str, event: nio.ForwardedRoomKeyEvent) -> bool:
+            if self._is_expected_forwarded_room_key(sender=sender, sender_key=sender_key, event=event):
+                return True
+            return bool(original_should_accept_forward(sender, sender_key, event))
+
+        olm._should_accept_forward = should_accept_forward
+        olm._hcz_cross_user_forward_acceptance = True
+
+    def _is_expected_forwarded_room_key(
+        self,
+        *,
+        sender: str,
+        sender_key: str,
+        event: nio.ForwardedRoomKeyEvent,
+    ) -> bool:
+        client = self._require_client()
+        session_id = str(getattr(event, "session_id", "") or "")
+        if not session_id or session_id not in client.outgoing_key_requests:
+            return False
+
+        key_request = client.outgoing_key_requests[session_id]
+        if (
+            str(getattr(event, "algorithm", "") or "") != str(getattr(key_request, "algorithm", "") or "")
+            or str(getattr(event, "room_id", "") or "") != str(getattr(key_request, "room_id", "") or "")
+            or session_id != str(getattr(key_request, "session_id", "") or "")
+        ):
+            return False
+
+        content = self._event_content(event)
+        forwarded_sender_key = str(content.get("sender_key") or sender_key or "").strip()
+        for pending_event in self._pending_megolm_events.values():
+            if str(getattr(pending_event, "session_id", "") or "") != session_id:
+                continue
+            if str(getattr(pending_event, "room_id", "") or "") != str(getattr(event, "room_id", "") or ""):
+                continue
+            if str(getattr(pending_event, "sender", "") or "") != str(sender or ""):
+                continue
+            if str(getattr(pending_event, "sender_key", "") or "") != forwarded_sender_key:
+                continue
+            return True
+        return False
+
     async def _bootstrap_sync_token(self) -> None:
         client = self._require_client()
         response = await client.sync(
@@ -364,6 +417,39 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             logger.info("Matrix SDK E2EE 消息缺少 room key，补钥匙请求已存在，继续缓存等待重试")
         except Exception as exc:
             logger.warning(f"Matrix SDK E2EE 补钥匙请求失败，已缓存等待后续重试: {exc.__class__.__name__}")
+        sender_requested = await self._request_room_key_from_sender(event)
+        if sender_requested:
+            logger.warning("Matrix SDK E2EE 已向原始发送设备请求 room key")
+
+    async def _request_room_key_from_sender(self, event: nio.MegolmEvent) -> bool:
+        client = self._require_client()
+        sender = str(getattr(event, "sender", "") or "").strip()
+        sender_device = str(getattr(event, "device_id", "") or "").strip()
+        session_id = str(getattr(event, "session_id", "") or "").strip()
+        room_id = str(getattr(event, "room_id", "") or "").strip()
+        if not sender or not session_id or not room_id:
+            return False
+
+        request_key = f"{sender}|{sender_device}|{room_id}|{session_id}"
+        now = time.monotonic()
+        if now - self._sender_room_key_request_at.get(request_key, 0.0) < 60.0:
+            return False
+        self._sender_room_key_request_at[request_key] = now
+
+        message = event.as_key_request(
+            sender,
+            str(getattr(client, "device_id", "") or self._device_id()),
+            device_id=sender_device or None,
+        )
+        if getattr(client, "olm", None):
+            key_request = OutgoingKeyRequest.from_message(message)
+            client.outgoing_key_requests[key_request.request_id] = key_request
+            if getattr(client.olm, "store", None):
+                with contextlib.suppress(Exception):
+                    client.olm.store.add_outgoing_key_request(key_request)
+
+        response = await client.to_device(message, tx_id=f"hcz-sender-room-key-{int(time.time() * 1000)}")
+        return isinstance(response, nio.ToDeviceResponse)
 
     async def _on_room_key_event(self, event: nio.RoomKeyEvent) -> None:
         retried = await self._retry_pending_megolm_events(
