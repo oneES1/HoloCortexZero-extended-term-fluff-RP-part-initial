@@ -346,12 +346,15 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             return
         logger.warning(f"Matrix SDK 自动加入邀请失败: room_id={room.room_id} response={response}")
 
-    async def _on_megolm_event(self, room: nio.MatrixRoom, event: nio.MegolmEvent) -> None:
-        logger.warning(
-            f"Matrix SDK E2EE 解密失败或缺少 room key: room={room.room_id} "
-            f"sender={getattr(event, 'sender', '')} event={getattr(event, 'event_id', '')} "
-            f"session={getattr(event, 'session_id', '')}"
-        )
+    async def _on_megolm_event(self, _room: nio.MatrixRoom, event: nio.MegolmEvent) -> None:
+        client = self._require_client()
+        try:
+            await client.request_room_key(event)
+            logger.warning("Matrix SDK E2EE 解密失败或缺少 room key，已请求补发 room key 并跳过当前事件")
+        except nio.LocalProtocolError:
+            logger.info("Matrix SDK E2EE room key 已请求过，继续跳过当前未解密事件")
+        except Exception as exc:
+            logger.warning(f"Matrix SDK E2EE room key 请求失败，已跳过当前未解密事件: {exc.__class__.__name__}")
 
     async def _on_room_message(self, room: nio.MatrixRoom, event: Any) -> None:
         event_id = str(getattr(event, "event_id", "") or "").strip()
