@@ -248,7 +248,12 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
 
                 message_processor = MessageProcessor(self)
                 application.add_handler(
-                    MessageHandler(filters.ALL, message_processor.process_update),
+                    MessageHandler(
+                        filters.UpdateType.MESSAGES
+                        | filters.UpdateType.CHANNEL_POSTS
+                        | filters.UpdateType.BUSINESS_MESSAGES,
+                        message_processor.process_update,
+                    ),
                 )
 
                 await application.initialize()

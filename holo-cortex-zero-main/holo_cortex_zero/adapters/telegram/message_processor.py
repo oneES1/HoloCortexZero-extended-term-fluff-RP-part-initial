@@ -54,26 +54,20 @@ class MessageProcessor:
     async def process_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """处理 Telegram 更新"""
         try:
-            if update.message:
-                await self._handle_message(update.message, context)
-            elif update.edited_message:
-                await self._handle_edited_message(update.edited_message, context)
-            elif update.channel_post:
-                await self._handle_message(update.channel_post, context)
-            elif update.edited_channel_post:
-                await self._handle_edited_message(update.edited_channel_post, context)
-            elif getattr(update, "business_message", None):
-                await self._handle_message(update.business_message, context)
-            elif getattr(update, "edited_business_message", None):
-                await self._handle_edited_message(update.edited_business_message, context)
-            # 可以添加更多类型的处理，如 inline_query, callback_query 等
+            message = update.effective_message
+            if not message:
+                return
+            if update.edited_message or update.edited_channel_post or getattr(update, "edited_business_message", None):
+                await self._handle_edited_message(message, context)
+                return
+            await self._handle_message(message, context)
         except Exception as e:
             logger.error(f"处理 Telegram 更新时出错: {e.__class__.__name__}")
 
     async def _handle_message(self, message: Message, context: ContextTypes.DEFAULT_TYPE = None) -> None:
         """处理消息"""
-        sender_user = getattr(message, "from_user", None)
         sender_chat = self._get_effective_sender_chat(message)
+        sender_user = None if sender_chat else getattr(message, "from_user", None)
         if not sender_user and message.chat.type == "private":
             return
         if not sender_user and not sender_chat:
@@ -83,10 +77,10 @@ class MessageProcessor:
             return
 
         # 获取用户真实昵称和显示名称
-        if sender_user:
-            user_display_name, user_nickname = await self._get_user_display_info(sender_user, message.chat)
-        else:
+        if sender_chat:
             user_display_name, user_nickname = self._get_sender_chat_display_info(sender_chat)
+        else:
+            user_display_name, user_nickname = await self._get_user_display_info(sender_user, message.chat)
 
         raw_user_id, raw_sender_name, raw_sender_nickname = self._get_effective_sender_profile(
             message,
@@ -125,7 +119,7 @@ class MessageProcessor:
             content_text=self._extract_text_content(content_segments),
             content_data=content_segments,
             sender_nickname=raw_sender_nickname,
-            is_self=bool(sender_user and context and context.bot and sender_user.id == context.bot.id),
+            is_self=bool(not sender_chat and sender_user and context and context.bot and sender_user.id == context.bot.id),
             is_tome=self._is_mentioned(message, context),
             ext_data=self._build_reference_ext(content_segments, self.adapter.build_chat_key(message.chat)),
         )
@@ -608,19 +602,21 @@ class MessageProcessor:
         display_name: str = "",
         nickname: str = "",
     ) -> tuple[str, str, str]:
-        sender_user = getattr(message, "from_user", None)
+        sender_chat = self._get_effective_sender_chat(message)
+        sender_user = None if sender_chat else getattr(message, "from_user", None)
+        if sender_chat:
+            sender_chat_id = str(getattr(sender_chat, "id", "") or "").strip()
+            effective_user_id = f"sender_chat_{sender_chat_id}" if sender_chat_id else ""
+            effective_sender_name = display_name or effective_user_id
+            effective_sender_nickname = nickname or effective_sender_name
+            return effective_user_id, effective_sender_name, effective_sender_nickname
         if sender_user:
             effective_user_id = str(getattr(sender_user, "id", "") or "")
             effective_sender_name = display_name or effective_user_id
             effective_sender_nickname = nickname or effective_sender_name
             return effective_user_id, effective_sender_name, effective_sender_nickname
 
-        sender_chat = self._get_effective_sender_chat(message)
-        sender_chat_id = str(getattr(sender_chat, "id", "") or "").strip()
-        effective_user_id = f"sender_chat_{sender_chat_id}" if sender_chat_id else ""
-        effective_sender_name = display_name or effective_user_id
-        effective_sender_nickname = nickname or effective_sender_name
-        return effective_user_id, effective_sender_name, effective_sender_nickname
+        return "", display_name, nickname or display_name
 
     def _preview_canonical_attachment_identity(self, message: Message) -> tuple[str, str]:
         raw_user_id, _, _ = self._get_effective_sender_profile(message)
@@ -649,12 +645,13 @@ class MessageProcessor:
             return None
         ref_sender_name = ""
         ref_sender_nickname = ""
-        if getattr(message, "from_user", None):
+        ref_sender_chat = self._get_effective_sender_chat(message)
+        if ref_sender_chat:
+            ref_sender_name, ref_sender_nickname = self._get_sender_chat_display_info(ref_sender_chat)
+        elif getattr(message, "from_user", None):
             ref_sender_name, ref_sender_nickname = await self._get_user_display_info(message.from_user, message.chat)
         else:
-            ref_sender_name, ref_sender_nickname = self._get_sender_chat_display_info(
-                self._get_effective_sender_chat(message),
-            )
+            ref_sender_name, ref_sender_nickname = "", ""
         ref_sender_id, effective_ref_name, _ = self._get_effective_sender_profile(
             message,
             ref_sender_name,
@@ -678,7 +675,9 @@ class MessageProcessor:
             return True
             
         # 在群聊中检查是否被提及
-        if not message.entities:
+        entities = message.entities or message.caption_entities
+        text = message.text or message.caption or ""
+        if not entities:
             return False
             
         # 获取机器人的用户名
@@ -687,12 +686,12 @@ class MessageProcessor:
             bot_username = context.bot.username
             
         # 检查是否有 @机器人 的实体
-        for entity in message.entities:
+        for entity in entities:
             if entity.type == "mention":
                 # 提取 mention 的文本
                 start = entity.offset
                 end = entity.offset + entity.length
-                mention_text = message.text[start:end] if message.text else ""
+                mention_text = text[start:end] if text else ""
                 
                 # 检查是否提及了机器人
                 if bot_username and mention_text == f"@{bot_username}":
