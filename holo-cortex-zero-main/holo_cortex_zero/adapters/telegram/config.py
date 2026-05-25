@@ -2,10 +2,13 @@
 Telegram 适配器配置
 """
 
+from pathlib import Path
+
 from pydantic import Field
 
 from holo_cortex_zero.adapters.interface.base import BaseAdapterConfig
 from holo_cortex_zero.core.core_utils import ExtraField
+from holo_cortex_zero.core.os_env import OsEnv
 from holo_cortex_zero.schemas.i18n import i18n_text
 
 
@@ -122,3 +125,6 @@ class TelegramConfig(BaseAdapterConfig):
         ),
     ).model_dump(),
     )
+
+
+TelegramConfig.set_config_file_path(Path(OsEnv.DATA_DIR) / "configs" / "telegram" / "config.yaml")
