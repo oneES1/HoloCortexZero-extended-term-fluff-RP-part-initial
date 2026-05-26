@@ -100,6 +100,10 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
             "私聊: `telegram-private_123456789` (正数为私聊用户)",
         ]
 
+    @property
+    def init_in_background(self) -> bool:
+        return True
+
     def get_primary_advanced_platform_user_ids(self) -> set[str]:
         uid = str(getattr(self.config, "OWNER_TG_USER_ID", "") or "").strip()
         return {uid} if uid else set()
@@ -240,6 +244,7 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
         proxy_url, proxy_source = self._effective_proxy_url()
         proxy_mask = "<none>" if not proxy_url else proxy_url
         init_attempts = 3
+        last_error: Optional[Exception] = None
 
         for attempt in range(1, init_attempts + 1):
             application: Optional[Application] = None
@@ -269,6 +274,7 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
                 return
 
             except Exception as e:
+                last_error = e
                 logger.error(f"Telegram 适配器初始化失败 attempt={attempt}/{init_attempts}: {e}")
                 if application is not None:
                     with contextlib.suppress(Exception):
@@ -284,6 +290,8 @@ class TelegramAdapter(BaseAdapter[TelegramConfig]):
 
         self.application = None
         self.message_processor = None
+        error_class = last_error.__class__.__name__ if last_error is not None else "unknown"
+        raise RuntimeError(f"Telegram 适配器初始化失败: {error_class}")
 
     async def _start_polling(self) -> None:
         """启动轮询"""
