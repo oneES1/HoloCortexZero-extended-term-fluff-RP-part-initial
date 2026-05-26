@@ -17,6 +17,7 @@ ADAPTER_DICT: Dict[str, str] = {
 
 loaded_adapters: Dict[str, BaseAdapter] = {}
 adapter_init_tasks: Dict[str, asyncio.Task] = {}
+adapter_init_failures: Dict[str, str] = {}
 
 
 def load_adapters_api() -> APIRouter:
@@ -37,15 +38,16 @@ def load_adapters_api() -> APIRouter:
 
 async def init_adapters(_app: FastAPI):
     async def run_adapter_init(adapter_key: str, adapter: BaseAdapter):
+        adapter_init_failures.pop(adapter_key, None)
         try:
             await adapter.init()
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception(f"Adapter {adapter_key} init failed, skip adapter startup")
             with contextlib.suppress(Exception):
                 await adapter.cleanup()
-            loaded_adapters.pop(adapter_key, None)
+            adapter_init_failures[adapter_key] = exc.__class__.__name__
             return
         finally:
             adapter_init_tasks.pop(adapter_key, None)

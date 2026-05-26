@@ -5,7 +5,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from holo_cortex_zero.adapters import ADAPTER_DICT, adapter_init_tasks, loaded_adapters
+from holo_cortex_zero.adapters import ADAPTER_DICT, adapter_init_failures, adapter_init_tasks, loaded_adapters
 from holo_cortex_zero.adapters.interface.base import AdapterMetadata
 from holo_cortex_zero.core.logger import logger
 from holo_cortex_zero.schemas.message import Ret
@@ -52,9 +52,10 @@ async def get_adapters_list(_platform_admin: PlatformAdminPrincipal = Depends(ge
             adapter_instance = loaded_adapters.get(adapter_key)
             init_task = adapter_init_tasks.get(adapter_key)
             is_initializing = init_task is not None and not init_task.done()
+            init_failure = adapter_init_failures.get(adapter_key)
 
             if adapter_instance:
-                status = "initializing" if is_initializing else "loaded"
+                status = "initializing" if is_initializing else "failed" if init_failure else "loaded"
                 config_class = adapter_instance.config.__class__.__name__
                 chat_key_rules = adapter_instance.chat_key_rules
                 has_config = hasattr(adapter_instance, "config") and adapter_instance.config is not None
@@ -103,6 +104,7 @@ async def get_adapter_info(
         adapter_instance = loaded_adapters.get(adapter_key)
         init_task = adapter_init_tasks.get(adapter_key)
         is_initializing = init_task is not None and not init_task.done()
+        init_failure = adapter_init_failures.get(adapter_key)
 
         if not adapter_instance:
             # 适配器未加载成功
@@ -131,7 +133,7 @@ async def get_adapter_info(
                 key=adapter_key,
                 name=metadata.name,
                 description=metadata.description,
-                status="initializing" if is_initializing else "loaded",
+                status="initializing" if is_initializing else "failed" if init_failure else "loaded",
                 config_class=adapter_instance.config.__class__.__name__,
                 chat_key_rules=adapter_instance.chat_key_rules,
                 has_config=hasattr(adapter_instance, "config") and adapter_instance.config is not None,
@@ -163,6 +165,7 @@ async def get_adapter_status(
         adapter_instance = loaded_adapters.get(adapter_key)
         init_task = adapter_init_tasks.get(adapter_key)
         is_initializing = init_task is not None and not init_task.done()
+        init_failure = adapter_init_failures.get(adapter_key)
 
         if not adapter_instance:
             status_info = {
@@ -174,14 +177,16 @@ async def get_adapter_status(
             }
         else:
             status_info = {
-                "status": "initializing" if is_initializing else "loaded",
+                "status": "initializing" if is_initializing else "failed" if init_failure else "loaded",
                 "loaded": True,
-                "initialized": not is_initializing,
+                "initialized": not is_initializing and not init_failure,
                 "has_config": hasattr(adapter_instance, "config") and adapter_instance.config is not None,
                 "config_file_exists": (
                     adapter_instance.config_path.exists() if hasattr(adapter_instance, "config_path") else False
                 ),
             }
+            if init_failure:
+                status_info["error_message"] = f"适配器初始化失败: {init_failure}"
 
         return Ret.success(msg="获取成功", data=status_info)
     except Exception as e:
