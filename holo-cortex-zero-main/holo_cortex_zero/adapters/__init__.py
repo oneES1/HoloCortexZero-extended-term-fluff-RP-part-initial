@@ -1,3 +1,4 @@
+import contextlib
 import importlib
 from typing import Dict, Type
 
@@ -33,8 +34,15 @@ def load_adapters_api() -> APIRouter:
 
 
 async def init_adapters(_app: FastAPI):
-    for adapter_key, adapter in loaded_adapters.items():
-        await adapter.init()
+    for adapter_key, adapter in list(loaded_adapters.items()):
+        try:
+            await adapter.init()
+        except Exception:
+            logger.exception(f"Adapter {adapter_key} init failed, skip adapter startup")
+            with contextlib.suppress(Exception):
+                await adapter.cleanup()
+            loaded_adapters.pop(adapter_key, None)
+            continue
         logger.info(f"Adapter {adapter_key} initialized")
 
 
