@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import importlib
 from typing import Dict, Type
@@ -15,6 +16,7 @@ ADAPTER_DICT: Dict[str, str] = {
 }
 
 loaded_adapters: Dict[str, BaseAdapter] = {}
+adapter_init_tasks: Dict[str, asyncio.Task] = {}
 
 
 def load_adapters_api() -> APIRouter:
@@ -34,20 +36,41 @@ def load_adapters_api() -> APIRouter:
 
 
 async def init_adapters(_app: FastAPI):
-    for adapter_key, adapter in list(loaded_adapters.items()):
+    async def run_adapter_init(adapter_key: str, adapter: BaseAdapter):
         try:
             await adapter.init()
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception(f"Adapter {adapter_key} init failed, skip adapter startup")
             with contextlib.suppress(Exception):
                 await adapter.cleanup()
             loaded_adapters.pop(adapter_key, None)
-            continue
+            return
+        finally:
+            adapter_init_tasks.pop(adapter_key, None)
         logger.info(f"Adapter {adapter_key} initialized")
+
+    for adapter_key, adapter in list(loaded_adapters.items()):
+        if adapter.init_in_background:
+            task = asyncio.create_task(run_adapter_init(adapter_key, adapter), name=f"adapter-init-{adapter_key}")
+            adapter_init_tasks[adapter_key] = task
+            logger.info(f"Adapter {adapter_key} init scheduled in background")
+            continue
+        await run_adapter_init(adapter_key, adapter)
 
 
 async def cleanup_adapters(_app: FastAPI):
-    for adapter_key, adapter in loaded_adapters.items():
+    for adapter_key, task in list(adapter_init_tasks.items()):
+        if task.done():
+            adapter_init_tasks.pop(adapter_key, None)
+            continue
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        adapter_init_tasks.pop(adapter_key, None)
+
+    for adapter_key, adapter in list(loaded_adapters.items()):
         await adapter.cleanup()
         logger.info(f"Adapter {adapter_key} cleaned up")
 

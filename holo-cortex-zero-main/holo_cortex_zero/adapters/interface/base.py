@@ -108,6 +108,11 @@ class BaseAdapter(ABC, Generic[TConfig]):
             "Private chat: `platform-private_123456` (where 123456 is the user's QQ number)",
         ]
 
+    @property
+    def init_in_background(self) -> bool:
+        """Whether adapter init should avoid blocking the backend startup path."""
+        return False
+
     def get_primary_advanced_platform_user_ids(self) -> set[str]:
         """Return platform-side ids belonging to the primary HCZ advanced user.
 

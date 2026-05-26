@@ -95,6 +95,10 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
             "群聊: `matrix-group_<room_hash>`",
         ]
 
+    @property
+    def init_in_background(self) -> bool:
+        return True
+
     def get_adapter_router(self):
         from .routers import router
 
