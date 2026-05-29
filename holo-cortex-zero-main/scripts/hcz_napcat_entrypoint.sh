@@ -100,6 +100,34 @@ EOF
   chmod g+rw "${target}" 2>/dev/null || true
 }
 
+patch_napcat_login_guard() {
+  local bundle="/app/napcat/napcat.mjs"
+  local marker="HCZIsNapCatOnlineLogin"
+
+  [[ -f "${bundle}" ]] || return 0
+  if grep -q "${marker}" "${bundle}"; then
+    return 0
+  fi
+
+  # 主干：禁止重复登录只代表仍有真实在线会话，不能把残留 QQLoginStatus 当作在线。
+  # 分支兼容：保留 NapCat 原有二维码、密码、快捷登录流程，只收口登录守卫语义。
+  perl -0pi -e '
+    s/const QQCheckLoginStatusHandler = async \(_, res\) => \{/const HCZIsNapCatOnlineLogin = () => {\n  const oneBotContext = WebUiDataRuntime.getOneBotContext();\n  const selfInfo = oneBotContext?.core?.selfInfo;\n  return WebUiDataRuntime.getQQLoginStatus() && selfInfo?.online === true;\n};\nconst QQCheckLoginStatusHandler = async (_, res) => {/;
+    s/if \(WebUiDataRuntime\.getQQLoginStatus\(\)\) \{\n    return sendError\(res, "QQ Is Logined"\);\n  \}/if (HCZIsNapCatOnlineLogin()) {\n    return sendError(res, "QQ Is Logined");\n  }/g;
+    s/const isLogin = WebUiDataRuntime\.getQQLoginStatus\(\);\n  if \(isLogin\) \{\n    return sendError\(res, "QQ Is Logined"\);\n  \}/const isLogin = HCZIsNapCatOnlineLogin();\n  if (isLogin) {\n    return sendError(res, "QQ Is Logined");\n  }/g;
+  ' "${bundle}"
+
+  if ! grep -q "${marker}" "${bundle}"; then
+    echo "[runtime:napcat] failed to patch NapCat login guard: marker not found" >&2
+    exit 1
+  fi
+  if grep -n -B2 'QQ Is Logined' "${bundle}" | grep -q 'WebUiDataRuntime.getQQLoginStatus'; then
+    echo "[runtime:napcat] failed to patch NapCat login guard: stale guard remains" >&2
+    exit 1
+  fi
+  echo "[runtime:napcat] NapCat login guard patched"
+}
+
 # HCZ 一体化部署主干：NapCat 只反向连接本 compose 内的 OneBot v11 服务。
 # 固定 token 同时由 HCZ/NoneBot 校验，避免安装脚本、WebUI、运行态 JSON 各持一份。
 shopt -s nullglob
@@ -115,6 +143,7 @@ done
 shopt -u nullglob
 echo "[runtime:napcat] onebot_ws_url=${onebot_url} token_config_count=${#onebot_configs[@]}"
 write_webui_config "${napcat_webui_config}" "${napcat_webui_port}"
+patch_napcat_login_guard
 echo "[runtime:napcat] webui_port=${napcat_webui_port} webui_config=${napcat_webui_config}"
 
 exec bash entrypoint.sh
