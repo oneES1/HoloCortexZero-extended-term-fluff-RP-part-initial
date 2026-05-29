@@ -169,7 +169,7 @@ services:
 
   # Napcat 服务
   hcz_napcat:
-    image: mlikiowa/napcat-docker@sha256:d8098fdabedfe5cbc570b994aebb685c3096a2bebbf4ea43ffb21655a4758e63
+    image: mlikiowa/napcat-docker:latest
     container_name: ${INSTANCE_NAME:-}hcz_napcat
     user: "0:${HCZ_RUNTIME_GID:-1000}"
     entrypoint:
