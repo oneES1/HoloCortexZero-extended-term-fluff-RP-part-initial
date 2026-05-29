@@ -2104,57 +2104,6 @@ class ContextWindowManager:
                 append_sender_attribution=append_sender_attribution,
             )
             role = self._determine_role_for_db_msg(db_msg, context_id)
-            has_image_segment = self._db_msg_has_image_segment(db_msg)
-
-            if role == "assistant" and has_image_segment:
-                collected.append({
-                    "role": "user",
-                    "sender_id": db_msg.sender_id,
-                    "sender_name": sanitized_sender_name,
-                    "parts": self._build_user_image_parts(db_msg, parts),
-                    "source_chat_key": dialog_chat_key,
-                    "source_message_id": dedup_key,
-                    "msg_type": "human_chat",
-                })
-                continue
-
-            if role == "assistant":
-                text_parts = [part for part in parts if part.type not in {"image", "audio", "video"}]
-                media_parts = [part for part in parts if part.type in {"image", "audio", "video"}]
-
-                if text_parts:
-                    collected.append({
-                        "role": "assistant",
-                        "sender_id": db_msg.sender_id,
-                        "sender_name": sanitized_sender_name,
-                        "parts": text_parts,
-                        "source_chat_key": dialog_chat_key,
-                        "source_message_id": f"{dedup_key}#text",
-                        "msg_type": "human_chat",
-                    })
-
-                if media_parts:
-                    media_message_parts = media_parts
-                    collected.append({
-                        "role": "user",
-                        "sender_id": db_msg.sender_id,
-                        "sender_name": sanitized_sender_name,
-                        "parts": media_message_parts,
-                        "source_chat_key": dialog_chat_key,
-                        "source_message_id": f"{dedup_key}#media",
-                        "msg_type": "human_chat",
-                    })
-                elif not text_parts:
-                    collected.append({
-                        "role": "assistant",
-                        "sender_id": db_msg.sender_id,
-                        "sender_name": sanitized_sender_name,
-                        "parts": parts,
-                        "source_chat_key": dialog_chat_key,
-                        "source_message_id": dedup_key,
-                        "msg_type": "human_chat",
-                    })
-                continue
 
             collected.append({
                 "role": role,
@@ -2403,17 +2352,6 @@ class ContextWindowManager:
         except Exception:
             return None
 
-    def _db_msg_has_image_segment(self, db_msg: Any) -> bool:
-        try:
-            from holo_cortex_zero.schemas.chat_message import ChatMessageSegmentImage
-
-            segments = db_msg.parse_content_data()
-            return any(isinstance(seg, ChatMessageSegmentImage) for seg in segments)
-        except Exception as e:
-            logger.debug(f"检测图片消息段失败: {e}")
-            return False
-
-    @staticmethod
     def _normalize_workspace_path(path: Any) -> str:
         raw = str(path or "").strip()
         if not raw:
@@ -2481,9 +2419,6 @@ class ContextWindowManager:
             "video": "视频",
             "file": "文件",
         }.get(str(part_type or "").strip().lower(), "文件")
-
-    def _build_user_image_parts(self, db_msg: Any, parts: List[MessagePart]) -> List[MessagePart]:
-        return list(parts or [])
 
     def _is_advanced_sender(self, sender_id: str) -> bool:
         return is_advanced_user_id(sender_id, config)
@@ -2789,39 +2724,16 @@ class ContextWindowManager:
     def _determine_role_for_db_msg(self, db_msg: Any, context_id: str) -> str:
         """判断 DBChatMessage 在上下文中应该是什么角色
 
-        主干规则（区分普通/高级上下文窗口）：
+        主干规则：
         - 系统消息 → user
-        - 普通 context → 人类消息统一 user
-        - 高级 context → 高级用户 user，其他人类 assistant
+        - 人类消息 → user
 
-        注意：这里只决定“文本历史”的主角色，不改多模态 assistant→user
-        兜底分流主干，避免为图片/音频/视频/文件再并一套特化逻辑。
+        bot 历史在 sync_new_chat_messages 前面单独识别并写成 assistant，
+        这里不再按高级/普通 context 分裂人类角色，避免把群聊里的普通用户误投成模型侧 assistant。
         """
         if self._is_system_db_msg(db_msg):
             return "user"
-
-        sender_id = str(db_msg.platform_userid or db_msg.sender_id).strip()
-        normalized_context_id = str(context_id or "").strip()
-        is_advanced_context = self._is_advanced_sender(normalized_context_id)
-
-        if not is_advanced_context:
-            logger.debug(
-                "普通 context 历史消息按 user 注入: ctx=%s sender_id=%s",
-                normalized_context_id,
-                sender_id,
-            )
-            return "user"
-
-        # 高级 context 中，只有高级用户 → user
-        if self._is_advanced_sender(sender_id):
-            return "user"
-
-        logger.debug(
-            "高级 context 非高级用户降级为 assistant: ctx=%s sender_id=%s",
-            normalized_context_id,
-            sender_id,
-        )
-        return "assistant"
+        return "user"
 
 
 # 全局单例
