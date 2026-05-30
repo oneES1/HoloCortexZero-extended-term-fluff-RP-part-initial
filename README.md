@@ -2,6 +2,8 @@
 
 # 2026.5.22 Context structure update: the cache hit rate exceeds 98% at 8K context. This is a general update; explicit DeepSeek user_id cache isolation was also added to improve stability
 
+# 2026.5.30 Bot context backfill cleanup: optional auxiliary LLM cleanup now shortens only bot messages written back into framework context, while visible outgoing replies remain unchanged
+
 ## Download links for the Mac/Win client program | Mac/Win 客户端程序下载地址见：[GitHub Releases](https://github.com/oneES1/HoloCortexZero-extended-term-fluff-RP-part-initial/releases/latest)
 
 ### BiliBili：
