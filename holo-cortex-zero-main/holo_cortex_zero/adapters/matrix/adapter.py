@@ -1115,8 +1115,6 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         )
 
     def _is_private_sdk_room(self, room: nio.MatrixRoom) -> bool:
-        if self._room_has_name_or_alias(room):
-            return False
         try:
             total_members = int(getattr(room, "member_count", 0) or 0)
         except Exception:
@@ -1139,15 +1137,12 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         if is_direct:
             return True
         inviter = str(getattr(room, "inviter", "") or getattr(event, "sender", "") or "")
-        has_name_or_alias = self._room_has_name_or_alias(room)
-        if self.is_primary_advanced_platform_user(inviter) and not has_name_or_alias:
+        if self.is_primary_advanced_platform_user(inviter):
             logger.info(
-                f"Matrix SDK owner 邀请未携带 is_direct=true 且无 name/alias，按高级私聊邀请处理: "
+                f"Matrix SDK owner 邀请未携带 is_direct=true，按高级私聊邀请处理: "
                 f"room_id={room.room_id} inviter={inviter}"
             )
             return True
-        if has_name_or_alias:
-            return False
         logger.info(
             f"Matrix SDK 邀请未携带 is_direct=true，按群聊/未知邀请处理: "
             f"room_id={room.room_id} inviter={inviter}"
