@@ -2404,6 +2404,7 @@ class ContextWindowManager:
         except Exception:
             return None
 
+    @staticmethod
     def _normalize_workspace_path(path: Any) -> str:
         raw = str(path or "").strip()
         if not raw:
