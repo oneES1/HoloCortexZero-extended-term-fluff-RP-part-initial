@@ -1428,6 +1428,58 @@ class ContextWindowManager:
 
         return injected_count
 
+    async def record_bot_reply_backfill(
+        self,
+        *,
+        context_id: str,
+        text: str,
+        source_chat_key: str = "",
+        source_message_id: str = "",
+        reasoning_content: Optional[str] = None,
+    ) -> int:
+        """记录最终 bot 回复回填；调用方负责决定是否先经过辅助 LLM。"""
+        clean_text = self._sanitize_bot_assistant_text(text)
+        if not clean_text:
+            logger.info("assistant 纯文本历史被清洗为空，跳过写入: context=%s", context_id)
+            return 0
+
+        tool_calls_json = ""
+        normalized_reasoning_content = str(reasoning_content or "").strip()
+        if normalized_reasoning_content:
+            tool_calls_json = json.dumps(
+                [{"_hcz_meta": {"reasoning_content": normalized_reasoning_content}}],
+                ensure_ascii=False,
+            )
+            logger.debug(
+                "assistant 纯文本隐藏思考已随历史保存: context=%s chars=%s",
+                context_id,
+                len(normalized_reasoning_content),
+            )
+
+        created = await DBContextMessage.create(
+            context_id=context_id,
+            role="assistant",
+            parts_json=json.dumps(
+                [{"type": "text", "text": clean_text}], ensure_ascii=False
+            ),
+            tool_calls_json=tool_calls_json,
+            source_chat_key=source_chat_key,
+            source_message_id=source_message_id,
+            msg_type="bot_reply",
+        )
+        await self.enforce_history_hard_limit(context_id)
+        try:
+            from holo_cortex_zero.services.memory import auto_memory_service
+            await auto_memory_service.record_context_messages(
+                context_id=context_id,
+                latest_context_msg_id=int(getattr(created, "id", 0) or 0),
+                message_count=1,
+                dialog_chat_key=source_chat_key,
+            )
+        except Exception as e:
+            logger.error("auto_memory bot_reply 计数更新失败: context=%s: %s", context_id, e, exc_info=True)
+        return int(getattr(created, "id", 0) or 0)
+
     # ── 历史获取 ──
 
     async def get_history(

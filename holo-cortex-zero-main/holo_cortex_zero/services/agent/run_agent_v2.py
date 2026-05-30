@@ -37,6 +37,7 @@ from holo_cortex_zero.services.agent.resolver import fix_raw_response
 from holo_cortex_zero.services.agent.prompt_selector import select_main_system_prompt
 from holo_cortex_zero.services.ai_reply import system_ai_reply_service
 from holo_cortex_zero.services.advanced_context_mode import advanced_context_mode_service
+from holo_cortex_zero.services.bot_backfill_cleanup import bot_backfill_cleanup_service
 from holo_cortex_zero.services.context_window.assembler import context_assembler
 from holo_cortex_zero.services.context_window.manager import context_window_manager
 from holo_cortex_zero.services.message_service import message_service
@@ -100,6 +101,10 @@ async def run_agent_v2(
 
     # 4. 注入消息到上下文窗口
     max_inject = 12 if "group" in chat_key else 999
+    await bot_backfill_cleanup_service.flush_pending_for_context(
+        context_window.context_id,
+        reason="before_context_sync",
+    )
     await context_window_manager.sync_new_chat_messages(
         context_window.context_id,
         chat_key,
@@ -237,6 +242,7 @@ async def run_agent_v2(
         *,
         record_to_db: bool = True,
         precleaned: bool = False,
+        reasoning_content: Optional[str] = None,
     ) -> None:
         """发送回复到对话窗口；可选是否记录 bot 消息到 DB。"""
         try:
@@ -260,18 +266,29 @@ async def run_agent_v2(
                 chat_key=actual_key,
                 text=delivery_text,
             )
+            cleanup_enabled = bot_backfill_cleanup_service.is_enabled()
             if voice_result.sent_as_voice:
                 plt_resp = voice_result.response if isinstance(voice_result.response, PlatformSendResponse) else None
-                await message_service.push_bot_message_text_shadow(
+                db_message = await message_service.push_bot_message_text_shadow(
                     chat_key=actual_key,
                     text=delivery_text,
                     plt_response=plt_resp,
                 )
-                await _bind_latest_assistant_source_message_id(
-                    context_id=context_window.context_id,
-                    actual_key=actual_key,
-                    plt_resp=plt_resp,
-                )
+                if cleanup_enabled:
+                    await bot_backfill_cleanup_service.schedule_bot_reply_backfill(
+                        context_id=context_window.context_id,
+                        text=delivery_text,
+                        source_chat_key=actual_key,
+                        plt_response=plt_resp,
+                        chat_message_db_id=int(getattr(db_message, "id", 0) or 0),
+                        reasoning_content=reasoning_content,
+                    )
+                else:
+                    await _bind_latest_assistant_source_message_id(
+                        context_id=context_window.context_id,
+                        actual_key=actual_key,
+                        plt_resp=plt_resp,
+                    )
                 return
 
             emoji_result = await system_emoji_service.maybe_dispatch_reply(
@@ -280,31 +297,53 @@ async def run_agent_v2(
             )
             if emoji_result.sent_with_emoji:
                 plt_resp = emoji_result.response if isinstance(emoji_result.response, PlatformSendResponse) else None
-                await message_service.push_bot_message_text_shadow(
+                db_message = await message_service.push_bot_message_text_shadow(
                     chat_key=actual_key,
                     text=delivery_text,
                     plt_response=plt_resp,
                 )
+                if cleanup_enabled:
+                    await bot_backfill_cleanup_service.schedule_bot_reply_backfill(
+                        context_id=context_window.context_id,
+                        text=delivery_text,
+                        source_chat_key=actual_key,
+                        plt_response=plt_resp,
+                        chat_message_db_id=int(getattr(db_message, "id", 0) or 0),
+                        reasoning_content=reasoning_content,
+                    )
+                else:
+                    await _bind_latest_assistant_source_message_id(
+                        context_id=context_window.context_id,
+                        actual_key=actual_key,
+                        plt_resp=plt_resp,
+                    )
+                return
+
+            plt_resp = await _send_text_to_chat(actual_key, delivery_text)
+            db_message = await message_service.push_bot_message(
+                chat_key=actual_key,
+                agent_messages=delivery_text,
+                plt_response=plt_resp,
+            )
+            if cleanup_enabled:
+                await bot_backfill_cleanup_service.schedule_bot_reply_backfill(
+                    context_id=context_window.context_id,
+                    text=delivery_text,
+                    source_chat_key=actual_key,
+                    plt_response=plt_resp,
+                    chat_message_db_id=int(getattr(db_message, "id", 0) or 0),
+                    reasoning_content=reasoning_content,
+                )
+            else:
                 await _bind_latest_assistant_source_message_id(
                     context_id=context_window.context_id,
                     actual_key=actual_key,
                     plt_resp=plt_resp,
                 )
-                return
-
-            plt_resp = await _send_text_to_chat(actual_key, delivery_text)
-            await message_service.push_bot_message(
-                chat_key=actual_key,
-                agent_messages=delivery_text,
-                plt_response=plt_resp,
-            )
-            await _bind_latest_assistant_source_message_id(
-                context_id=context_window.context_id,
-                actual_key=actual_key,
-                plt_resp=plt_resp,
-            )
+            return
         except Exception as e:
             logger.error(f"发送回复失败: {e}", exc_info=True)
+            return
 
     async def send_error(dialog_key: str, text: str) -> None:
         """发送错误信息到对话窗口"""

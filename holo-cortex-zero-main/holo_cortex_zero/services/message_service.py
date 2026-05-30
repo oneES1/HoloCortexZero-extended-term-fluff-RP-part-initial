@@ -1072,7 +1072,7 @@ class MessageService:
         plt_response: Optional[PlatformSendResponse] = None,
         db_chat_channel: Optional[DBChatChannel] = None,
         ref_msg_id: Optional[str] = None,
-    ):
+    ) -> DBChatMessage:
         """推送机器人消息"""
         logger.info(f"Pushing Bot Message To Chat {chat_key}")
         db_chat_channel = db_chat_channel or await DBChatChannel.get_channel(chat_key=chat_key)
@@ -1143,7 +1143,7 @@ class MessageService:
                 )
 
         adapter = adapter_utils.get_adapter(db_chat_channel.adapter_key)
-        await DBChatMessage.create(
+        db_message = await DBChatMessage.create(
             message_id=plt_response.message_id if plt_response and plt_response.message_id else "",
             sender_id=-1,
             sender_name=persona_name,
@@ -1167,6 +1167,7 @@ class MessageService:
                 source_scope="system",
             )
             logger.info("系统 ai_reply 群聊 bot 回复完成，已续期 judge 窗口: chat={}", chat_key)
+        return db_message
 
     async def push_bot_message_text_shadow(
         self,
@@ -1175,7 +1176,7 @@ class MessageService:
         plt_response: Optional[PlatformSendResponse] = None,
         db_chat_channel: Optional[DBChatChannel] = None,
         ref_msg_id: Optional[str] = None,
-    ):
+    ) -> DBChatMessage:
         """推送仅保留文本语义的 bot shadow 记录。"""
         logger.info(f"Pushing Bot Text Shadow To Chat {chat_key}")
         db_chat_channel = db_chat_channel or await DBChatChannel.get_channel(chat_key=chat_key)
@@ -1187,7 +1188,7 @@ class MessageService:
             context_window_manager.sanitize_model_output_text(str(text or ""))
         )
         adapter = adapter_utils.get_adapter(db_chat_channel.adapter_key)
-        await DBChatMessage.create(
+        db_message = await DBChatMessage.create(
             message_id=plt_response.message_id if plt_response and plt_response.message_id else "",
             sender_id=-1,
             sender_name=persona_name,
@@ -1211,6 +1212,7 @@ class MessageService:
                 source_scope="system",
             )
             logger.info("系统 ai_reply 群聊 bot 文本影子回复完成，已续期 judge 窗口: chat={}", chat_key)
+        return db_message
 
     async def push_system_message(
         self,

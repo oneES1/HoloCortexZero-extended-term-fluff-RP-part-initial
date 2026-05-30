@@ -355,6 +355,54 @@ class CoreConfig(ConfigBase):
             ),
         ).model_dump(),
     )
+    BOT_MESSAGE_BACKFILL_CLEANUP_ENABLED: bool = Field(
+        default=False,
+        title="启用 bot 消息长度回填清理",
+        description="开启后，仅对写回框架上下文的长 bot 回复使用辅助 LLM 提炼；不影响对外发送内容。",
+        json_schema_extra=ExtraField(
+            i18n_title=i18n_text(
+                zh_CN="启用 bot 消息长度回填清理",
+                en_US="Enable Bot Backfill Cleanup",
+            ),
+            i18n_description=i18n_text(
+                zh_CN="开启后，仅对写回框架上下文的长 bot 回复使用辅助 LLM 提炼；不影响对外发送内容。",
+                en_US="When enabled, long bot replies are summarized only for framework context backfill; visible outgoing replies are unchanged.",
+            ),
+        ).model_dump(),
+    )
+    BOT_MESSAGE_BACKFILL_CLEANUP_MODEL_GROUP: str = Field(
+        default="",
+        title="bot 消息长度回填清理 LLM",
+        description="用于 bot 上下文回填清理的辅助聊天 LLM；为空时触发清理会降级为原文本回填。",
+        json_schema_extra=ExtraField(
+            ref_model_groups=True,
+            model_type="chat",
+            i18n_title=i18n_text(
+                zh_CN="bot 消息长度回填清理 LLM",
+                en_US="Bot Backfill Cleanup LLM",
+            ),
+            i18n_description=i18n_text(
+                zh_CN="用于 bot 上下文回填清理的辅助聊天 LLM；为空时触发清理会降级为原文本回填。",
+                en_US="Auxiliary chat LLM used for bot context backfill cleanup; empty falls back to original text backfill.",
+            ),
+        ).model_dump(),
+    )
+    BOT_MESSAGE_BACKFILL_CLEANUP_THRESHOLD_CHARS: int = Field(
+        default=120,
+        ge=1,
+        title="bot 消息长度回填清理阈值",
+        description="bot 回填文本超过该字符数时才调用辅助 LLM 清理。",
+        json_schema_extra=ExtraField(
+            i18n_title=i18n_text(
+                zh_CN="bot 消息长度回填清理阈值",
+                en_US="Bot Backfill Cleanup Threshold",
+            ),
+            i18n_description=i18n_text(
+                zh_CN="bot 回填文本超过该字符数时才调用辅助 LLM 清理。",
+                en_US="Only bot backfill text longer than this character count uses the auxiliary cleanup LLM.",
+            ),
+        ).model_dump(),
+    )
     MAIN_SYSTEM_PROMPT_NORMAL: str = Field(
         default=DEFAULT_MAIN_SYSTEM_PROMPT_NORMAL,
         title="普通用户上下文系统提示词",

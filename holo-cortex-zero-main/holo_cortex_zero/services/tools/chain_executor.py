@@ -24,6 +24,7 @@ from holo_cortex_zero.schemas.ir import (
     ToolCall,
     ToolResult,
 )
+from holo_cortex_zero.services.bot_backfill_cleanup import bot_backfill_cleanup_service
 from holo_cortex_zero.services.context_window.manager import context_window_manager
 from holo_cortex_zero.services.llm.router import LLMAPIChainExhaustedError, llm_router
 from holo_cortex_zero.services.tools.registry import RegisteredTool, ToolRuntimeBinding, tool_registry
@@ -462,6 +463,10 @@ class ToolChainExecutor:
                 await context_window_manager.increment_tool_chain(context_id)
 
                 try:
+                    await bot_backfill_cleanup_service.flush_pending_for_context(
+                        context_id,
+                        reason="before_tool_chain_sync",
+                    )
                     await context_window_manager.sync_new_chat_messages(
                         context_id,
                         context_window.active_dialog_id,
@@ -748,16 +753,22 @@ class ToolChainExecutor:
                         )
                         awaiting_post_tool_followup = False
 
-                    current_stage = "record_assistant_reply"
-                    await self._record_assistant_reply(
-                        context_id,
-                        final_text,
-                        source_chat_key=final_actual_key,
-                        reasoning_content=result.reasoning_content,
-                    )
+                    if not bot_backfill_cleanup_service.is_enabled():
+                        current_stage = "record_assistant_reply"
+                        await self._record_assistant_reply(
+                            context_id,
+                            final_text,
+                            source_chat_key=final_actual_key,
+                            reasoning_content=result.reasoning_content,
+                        )
                     current_stage = "send_final_reply"
                     send_reply_attempts += 1
-                    _send_reply_ret = await send_reply_fn(final_actual_key, final_text, precleaned=True)
+                    _send_reply_ret = await send_reply_fn(
+                        final_actual_key,
+                        final_text,
+                        precleaned=True,
+                        reasoning_content=result.reasoning_content,
+                    )
                     last_send_reply_ok = _send_reply_ret is not None
                     if not last_send_reply_ok:
                         send_reply_failures += 1
@@ -1058,45 +1069,12 @@ class ToolChainExecutor:
         reasoning_content: Optional[str] = None,
     ) -> None:
         """记录 assistant 的纯文本回复到上下文历史"""
-        from holo_cortex_zero.models.db_context_window import DBContextMessage
-
-        clean_text = self._sanitize_assistant_history_text(text)
-        if not clean_text:
-            logger.info(f"assistant 纯文本历史被清洗为空，跳过写入: context={context_id}")
-            return
-
-        normalized_reasoning_content = str(reasoning_content or "").strip()
-        tool_calls_json = ""
-        if normalized_reasoning_content:
-            tool_calls_json = json.dumps(
-                [{"_hcz_meta": {"reasoning_content": normalized_reasoning_content}}],
-                ensure_ascii=False,
-            )
-            logger.debug(
-                f"assistant 纯文本隐藏思考已随历史保存: context={context_id} chars={len(normalized_reasoning_content)}"
-            )
-
-        created = await DBContextMessage.create(
+        await context_window_manager.record_bot_reply_backfill(
             context_id=context_id,
-            role="assistant",
-            parts_json=json.dumps(
-                [{"type": "text", "text": clean_text}], ensure_ascii=False
-            ),
-            tool_calls_json=tool_calls_json,
+            text=text,
             source_chat_key=source_chat_key,
-            msg_type="bot_reply",
+            reasoning_content=reasoning_content,
         )
-        await context_window_manager.enforce_history_hard_limit(context_id)
-        try:
-            from holo_cortex_zero.services.memory import auto_memory_service
-            await auto_memory_service.record_context_messages(
-                context_id=context_id,
-                latest_context_msg_id=int(getattr(created, "id", 0) or 0),
-                message_count=1,
-                dialog_chat_key=source_chat_key,
-            )
-        except Exception as e:
-            logger.error(f"auto_memory bot_reply 计数更新失败: context={context_id}: {e}", exc_info=True)
 
     async def _record_assistant_with_tool_calls(
         self,
