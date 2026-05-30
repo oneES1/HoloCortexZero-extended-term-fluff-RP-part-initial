@@ -15,14 +15,14 @@ from holo_cortex_zero.services.llm.auxiliary import generate_auxiliary
 _AUX_NAME = "bot_backfill_cleanup"
 _AUX_SOURCE = "bot_backfill_cleanup"
 _CLEANUP_TIMEOUT_SECONDS = 50.0
-_CLEANUP_MAX_CHARS = 40
+_CLEANUP_MAX_CHARS = 30
 _SYSTEM_PROMPT = (
     "你的任务是**将对话文本进行留白，不完整，人味化**，你收到一份待清理文本，"
-    "你必须将其清理为40字内，要求：人类聊天发言语气，不完整句子，随性自如无格式，"
-    "选择性留白，松弛可爱灵动，删除动作神态等任何非必要描写。 "
-    "你**只能输出40字内清理后文段**，禁止输出无关额外内容"
+    "你必须将其清理为30字内，要求：人类聊天发言语气，不完整句子，随性自如无格式，"
+    "留白，松弛可爱灵动，**删除动作神态描写** "
+    "你**只能输出30字内清理后文段**，禁止输出无关额外内容"
 )
-_FINAL_USER_PROMPT = "现在你**只输出40字内清理后文段**"
+_FINAL_USER_PROMPT = "现在你**只输出30字内清理后文段**"
 
 
 @dataclass
