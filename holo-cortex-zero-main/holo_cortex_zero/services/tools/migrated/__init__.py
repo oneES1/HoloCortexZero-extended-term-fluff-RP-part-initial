@@ -26,11 +26,11 @@ from tool_runtime.tools import (
     PHOTOSHOP_DESCRIPTION,
     PHOTOSHOP_DISPLAY_NAME,
     PHOTOSHOP_PARAMETERS,
-    SEEK_CONFIG_MODEL,
-    SEEK_DESCRIPTION,
-    SEEK_DISPLAY_NAME,
-    SEEK_PARAMETERS,
-    SEEK_TOOL_ID,
+    WEBSEARCH_CONFIG_MODEL,
+    WEBSEARCH_DESCRIPTION,
+    WEBSEARCH_DISPLAY_NAME,
+    WEBSEARCH_PARAMETERS,
+    WEBSEARCH_TOOL_ID,
     WEATHER_CONFIG_MODEL,
     WEATHER_DESCRIPTION,
     WEATHER_DISPLAY_NAME,
@@ -40,7 +40,7 @@ from tool_runtime.tools import (
     gif_generation,
     lightroom,
     photoshop,
-    seek,
+    websearch,
     weather,
 )
 
@@ -79,15 +79,15 @@ def register_migrated_tools() -> None:
         config_model=WEATHER_CONFIG_MODEL,
     )
     tool_registry.register(
-        name=SEEK_TOOL_ID,
-        display_name=SEEK_DISPLAY_NAME,
-        handler=seek,
-        description=SEEK_DESCRIPTION,
-        parameters=SEEK_PARAMETERS,
+        name=WEBSEARCH_TOOL_ID,
+        display_name=WEBSEARCH_DISPLAY_NAME,
+        handler=websearch,
+        description=WEBSEARCH_DESCRIPTION,
+        parameters=WEBSEARCH_PARAMETERS,
         source_kind="migrated",
         capability_class="user_facing",
         default_scope="all",
-        config_model=SEEK_CONFIG_MODEL,
+        config_model=WEBSEARCH_CONFIG_MODEL,
     )
     tool_registry.register(
         name=ISOLATE_TOOL_ID,
@@ -101,4 +101,4 @@ def register_migrated_tools() -> None:
         config_model=ISOLATE_CONFIG_MODEL,
     )
     _register_magic_draw_tools()
-    logger.info("已注册迁移 Tool: weather, seek, isolate, magic_draw_*")
+    logger.info("已注册迁移 Tool: weather, websearch, isolate, magic_draw_*")

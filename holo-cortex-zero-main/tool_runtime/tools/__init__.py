@@ -69,12 +69,12 @@ from .magic_draw import (
     lightroom,
     photoshop,
 )
-from .seek import CONFIG_MODEL as SEEK_CONFIG_MODEL
-from .seek import DESCRIPTION as SEEK_DESCRIPTION
-from .seek import DISPLAY_NAME as SEEK_DISPLAY_NAME
-from .seek import PARAMETERS as SEEK_PARAMETERS
-from .seek import TOOL_ID as SEEK_TOOL_ID
-from .seek import seek
+from .websearch import CONFIG_MODEL as WEBSEARCH_CONFIG_MODEL
+from .websearch import DESCRIPTION as WEBSEARCH_DESCRIPTION
+from .websearch import DISPLAY_NAME as WEBSEARCH_DISPLAY_NAME
+from .websearch import PARAMETERS as WEBSEARCH_PARAMETERS
+from .websearch import TOOL_ID as WEBSEARCH_TOOL_ID
+from .websearch import websearch
 from .weather import CONFIG_MODEL as WEATHER_CONFIG_MODEL
 from .weather import DESCRIPTION as WEATHER_DESCRIPTION
 from .weather import DISPLAY_NAME as WEATHER_DISPLAY_NAME
@@ -123,11 +123,11 @@ __all__ = [
     "SEARCH_CODE_DISPLAY_NAME",
     "SEARCH_CODE_PARAMETERS",
     "SEARCH_CODE_TOOL_ID",
-    "SEEK_CONFIG_MODEL",
-    "SEEK_DESCRIPTION",
-    "SEEK_DISPLAY_NAME",
-    "SEEK_PARAMETERS",
-    "SEEK_TOOL_ID",
+    "WEBSEARCH_CONFIG_MODEL",
+    "WEBSEARCH_DESCRIPTION",
+    "WEBSEARCH_DISPLAY_NAME",
+    "WEBSEARCH_PARAMETERS",
+    "WEBSEARCH_TOOL_ID",
     "SEND_FILE_DESCRIPTION",
     "SEND_FILE_DISPLAY_NAME",
     "SEND_FILE_PARAMETERS",
@@ -150,7 +150,7 @@ __all__ = [
     "read_file",
     "run_command",
     "search_code",
-    "seek",
+    "websearch",
     "send_file",
     "weather",
     "write_file",

@@ -10,9 +10,9 @@ from tool_runtime.host import ToolHostBridge
 from tool_runtime.result import ToolOutcome, ToolPart
 
 
-TOOL_ID = "seek"
-DISPLAY_NAME = "联网搜索"
-DESCRIPTION = "通过 Tavily Search 获取文字摘要与来源链接"
+TOOL_ID = "websearch"
+DISPLAY_NAME = "websearch"
+DESCRIPTION = "使用 websearch 进行联网搜索，返回 Tavily Search 的文字摘要与来源链接"
 PARAMETERS = {
     "type": "object",
     "properties": {
@@ -44,7 +44,7 @@ _TAVILY_KEY_HELP_EN = """How to get a Tavily API Key:
 Note: The API Key is a secret. Do not share it in groups or commit it to public repos."""
 
 
-class SeekConfig(BaseModel):
+class WebSearchConfig(BaseModel):
     API_HOST: str = Field(
         default="https://api.tavily.com",
         title="Tavily API Host",
@@ -119,7 +119,7 @@ class SeekConfig(BaseModel):
     )
 
 
-CONFIG_MODEL = SeekConfig
+CONFIG_MODEL = WebSearchConfig
 
 
 def _clip_text(text: str, *, max_chars: int) -> str:
@@ -190,7 +190,7 @@ def _format_response(query: str, response: dict[str, Any], *, limit: int, snippe
 async def _call_tavily_once(
     *,
     tool_host: ToolHostBridge,
-    config: SeekConfig,
+    config: WebSearchConfig,
     query: str,
     depth: str,
     topic: str,
@@ -232,7 +232,7 @@ async def _call_tavily_once(
 async def _search_merged(
     *,
     tool_host: ToolHostBridge,
-    config: SeekConfig,
+    config: WebSearchConfig,
     query: str,
     want: int,
     depth: str,
@@ -316,15 +316,15 @@ async def _search_merged(
     return first
 
 
-async def seek(
+async def websearch(
     query: str,
     tool_host: ToolHostBridge | None = None,
-    tool_config: SeekConfig | None = None,
+    tool_config: WebSearchConfig | None = None,
 ) -> ToolOutcome:
-    config = tool_config or SeekConfig()
+    config = tool_config or WebSearchConfig()
     normalized_query = str(query or "").strip()
     if tool_host is None:
-        return _text_outcome("Seek Tool 缺少宿主桥接。", is_error=True, trace_summary="missing_host")
+        return _text_outcome("websearch Tool 缺少宿主桥接。", is_error=True, trace_summary="missing_host")
     if not normalized_query:
         return _text_outcome("请提供搜索词。", is_error=True, trace_summary="bad_args")
     if not str(config.TAVILY_API_KEY or "").strip():
@@ -338,7 +338,7 @@ async def seek(
 
     await tool_host.log(
         "info",
-        "seek tool start",
+        "websearch tool start",
         query=normalized_query,
         want=want,
         depth=depth,
@@ -368,8 +368,8 @@ async def seek(
         )
         if response.get("merge_error"):
             text = f"{text}\n\n（补齐结果时发生异常：{response.get('merge_error')}）"
-        await tool_host.log("info", "seek tool success", query=normalized_query, result_count=want)
-        return _text_outcome(text, is_error=False, trace_summary=f"seek:{normalized_query}")
+        await tool_host.log("info", "websearch tool success", query=normalized_query, result_count=want)
+        return _text_outcome(text, is_error=False, trace_summary=f"websearch:{normalized_query}")
     except httpx.HTTPStatusError as exc:
         body_preview = ""
         try:
@@ -378,7 +378,7 @@ async def seek(
             body_preview = ""
         await tool_host.log(
             "error",
-            "seek tool http error",
+            "websearch tool http error",
             query=normalized_query,
             status_code=exc.response.status_code,
             body=body_preview,
@@ -389,8 +389,8 @@ async def seek(
             trace_summary=f"http_{exc.response.status_code}",
         )
     except httpx.RequestError as exc:
-        await tool_host.log("error", "seek tool request error", query=normalized_query, error=str(exc))
+        await tool_host.log("error", "websearch tool request error", query=normalized_query, error=str(exc))
         return _text_outcome("联网搜索请求失败，请稍后再试。", is_error=True, trace_summary="request_error")
     except Exception as exc:
-        await tool_host.log("error", "seek tool unexpected error", query=normalized_query, error=str(exc))
+        await tool_host.log("error", "websearch tool unexpected error", query=normalized_query, error=str(exc))
         return _text_outcome(f"搜索时遇到未知错误：{exc}", is_error=True, trace_summary="unexpected_error")
