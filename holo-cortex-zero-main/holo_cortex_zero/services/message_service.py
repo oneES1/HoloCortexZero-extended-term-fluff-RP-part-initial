@@ -234,13 +234,9 @@ class MessageService:
         return bool(str(getattr(message, "content_text", "") or "").strip())
 
     @classmethod
-    def _message_has_audio_file_segment(cls, message: ChatMessage) -> bool:
-        audio_exts = {".mp3", ".wav", ".ogg", ".oga", ".opus", ".m4a", ".flac", ".aac", ".amr", ".silk", ".webm"}
+    def _message_has_attachment_segment(cls, message: ChatMessage) -> bool:
         for segment in list(getattr(message, "content_data", []) or []):
-            if cls._get_message_segment_type(segment) != "file":
-                continue
-            file_name = str(getattr(segment, "file_name", "") or "").strip()
-            if Path(file_name).suffix.lower() in audio_exts:
+            if cls._get_message_segment_type(segment) in {"file", "image"}:
                 return True
         return False
 
@@ -876,7 +872,7 @@ class MessageService:
         if (
             context_window
             and context_window_manager.is_advanced_window(context_window)
-            and self._message_has_audio_file_segment(message)
+            and self._message_has_attachment_segment(message)
             and not context_window_manager.is_tool_chain_active(context_id)
         ):
             await context_window_manager.sync_new_chat_messages(
