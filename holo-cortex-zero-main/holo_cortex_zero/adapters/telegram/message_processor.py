@@ -670,7 +670,7 @@ class MessageProcessor:
 
     def _preview_canonical_attachment_identity(self, message: Message) -> tuple[str, str]:
         raw_user_id, _, _ = self._get_effective_sender_profile(message)
-        raw_channel_id = self.adapter._get_channel_id(message.chat)
+        _, raw_channel_id = self.adapter.parse_chat_key(self.adapter.build_chat_key(message.chat))
         channel_type = ChatType.PRIVATE if getattr(message.chat, "type", "") == "private" else ChatType.GROUP
         preview = preview_canonical_inbound_identity(
             adapter=self.adapter,
