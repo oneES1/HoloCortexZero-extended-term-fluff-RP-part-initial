@@ -233,17 +233,6 @@ class MessageService:
             return False
         return bool(str(getattr(message, "content_text", "") or "").strip())
 
-    @classmethod
-    def _message_has_audio_file_segment(cls, message: ChatMessage) -> bool:
-        audio_exts = {".mp3", ".wav", ".ogg", ".oga", ".opus", ".m4a", ".flac", ".aac", ".amr", ".silk", ".webm"}
-        for segment in list(getattr(message, "content_data", []) or []):
-            if cls._get_message_segment_type(segment) != "file":
-                continue
-            file_name = str(getattr(segment, "file_name", "") or "").strip()
-            if Path(file_name).suffix.lower() in audio_exts:
-                return True
-        return False
-
     @staticmethod
     def _load_json_dict(raw_value: Any) -> Dict[str, Any]:
         if isinstance(raw_value, dict):
@@ -872,18 +861,6 @@ class MessageService:
             ext_data=json.dumps(message.ext_data, ensure_ascii=False),
             send_timestamp=int(time.time()),  # 使用处理后的时间戳
         )
-
-        if (
-            context_window
-            and context_window_manager.is_advanced_window(context_window)
-            and self._message_has_audio_file_segment(message)
-            and not context_window_manager.is_tool_chain_active(context_id)
-        ):
-            await context_window_manager.sync_new_chat_messages(
-                context_id,
-                message.chat_key,
-                max_inject=1,
-            )
 
         should_ignore = (user and user.is_prevent_trigger) or (user and not user.is_active)
 
