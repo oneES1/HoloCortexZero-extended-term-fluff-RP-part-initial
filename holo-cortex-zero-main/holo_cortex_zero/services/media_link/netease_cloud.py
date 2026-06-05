@@ -18,6 +18,7 @@ from Crypto.Util.Padding import pad
 
 from holo_cortex_zero.core.logger import logger
 from holo_cortex_zero.schemas.chat_message import ChatMessageSegmentFile
+from holo_cortex_zero.services.file_system.policy import AttachmentIngestMode, resolve_incoming_attachment_mode
 
 _NETEASE_HOSTS = {"163cn.tv", "music.163.com", "y.music.163.com"}
 _URL_RE = re.compile(r"https?://[^\s<>'\"，。！？；、]+")
@@ -399,6 +400,7 @@ async def fetch_netease_audio_from_message(
     *,
     from_chat_key: str,
     max_bytes: int,
+    ingest_mode: AttachmentIngestMode = "managed",
 ) -> Optional[ChatMessageSegmentFile]:
     urls = extract_netease_urls(platform_message)
     if not urls:
@@ -425,7 +427,7 @@ async def fetch_netease_audio_from_message(
                     data,
                     from_chat_key=from_chat_key,
                     file_name=result.candidate.file_name,
-                    ingest_mode="managed",
+                    ingest_mode=ingest_mode,
                     mime_type=result.candidate.mime_type,
                 )
             except Exception as exc:
@@ -437,3 +439,37 @@ async def fetch_netease_audio_from_message(
                 )
                 continue
     return None
+
+
+async def append_netease_audio_from_message(
+    platform_message: Any,
+    *,
+    adapter_key: str,
+    chat_key: str,
+    chat_type: str,
+    sender_id: str,
+    platform_userid: str,
+    max_bytes: int,
+) -> bool:
+    ingest_mode, _ = resolve_incoming_attachment_mode(
+        adapter_key=adapter_key,
+        chat_key=chat_key,
+        chat_type=chat_type,
+        sender_id=sender_id,
+        platform_userid=platform_userid,
+        attachment_kind="audio",
+        channel_type=chat_type,
+    )
+    if ingest_mode == "disabled":
+        return False
+
+    audio_segment = await fetch_netease_audio_from_message(
+        platform_message,
+        from_chat_key=chat_key,
+        max_bytes=max_bytes,
+        ingest_mode=ingest_mode,
+    )
+    if not audio_segment:
+        return False
+    platform_message.content_data.append(audio_segment)
+    return True

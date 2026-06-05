@@ -26,10 +26,12 @@ from holo_cortex_zero.adapters.onebot_v11.tools.onebot_util import (
     get_message_reply_info,
     get_user_name,
 )
+from holo_cortex_zero.core import config
 from holo_cortex_zero.core.logger import logger
 from holo_cortex_zero.models.db_chat_channel import DBChatChannel
 from holo_cortex_zero.models.db_user import DBUser
 from holo_cortex_zero.schemas.chat_message import extract_primary_reference_segment
+from holo_cortex_zero.services.media_link import append_netease_audio_from_message
 
 
 def register_matcher(adapter: BaseAdapter):
@@ -105,6 +107,21 @@ def register_matcher(adapter: BaseAdapter):
                 ref_msg_id=(ref_segment.ref_msg_id if ref_segment else ref_msg_id),
                 ref_sender_id=ref_segment.ref_sender_id if ref_segment else "",
             ),
+        )
+        identity_preview = preview_canonical_inbound_identity(
+            adapter=adapter,
+            raw_platform_userid=plt_user.user_id,
+            raw_channel_id=channel_id,
+            channel_type=chat_type,
+        )
+        await append_netease_audio_from_message(
+            plt_msg,
+            adapter_key=adapter.key,
+            chat_key=identity_preview.canonical_chat_key,
+            chat_type=str(getattr(chat_type, "value", chat_type) or ""),
+            sender_id=identity_preview.canonical_userid,
+            platform_userid=identity_preview.canonical_userid,
+            max_bytes=int(getattr(config, "MAX_UPLOAD_SIZE_MB", 10) or 10) * 1024 * 1024,
         )
 
         # 提交收集消息

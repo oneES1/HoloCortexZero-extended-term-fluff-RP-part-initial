@@ -42,6 +42,7 @@ from holo_cortex_zero.schemas.chat_message import (
     extract_primary_reference_segment,
 )
 from holo_cortex_zero.services.file_system.policy import resolve_incoming_attachment_mode
+from holo_cortex_zero.services.media_link import append_netease_audio_from_message
 
 from .config import MatrixConfig
 
@@ -803,6 +804,16 @@ class MatrixAdapter(BaseAdapter[MatrixConfig]):
         )
         if platform_message.ext_data:
             platform_message.ext_data.native_voice = self._is_voice_message(self._event_content(event))
+        route_chat_type = getattr(route.channel_type, "value", route.channel_type)
+        await append_netease_audio_from_message(
+            platform_message,
+            adapter_key=self.key,
+            chat_key=policy_chat_key,
+            chat_type=str(route_chat_type or ""),
+            sender_id=policy_sender_id,
+            platform_userid=policy_sender_id,
+            max_bytes=int(getattr(config, "MAX_UPLOAD_SIZE_MB", 10) or 10) * 1024 * 1024,
+        )
         await collect_message(
             self,
             platform_channel,

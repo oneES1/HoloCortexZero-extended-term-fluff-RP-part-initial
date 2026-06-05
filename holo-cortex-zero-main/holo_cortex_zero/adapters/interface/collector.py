@@ -2,13 +2,10 @@ import time
 from typing import TYPE_CHECKING, Optional
 
 from holo_cortex_zero.adapters.interface.identity import canonicalize_inbound_identity
-from holo_cortex_zero.core.config import config
 from holo_cortex_zero.core.logger import logger
 from holo_cortex_zero.models.db_chat_channel import DBChatChannel
 from holo_cortex_zero.models.db_user import DBUser
 from holo_cortex_zero.schemas.chat_message import ChatMessage
-from holo_cortex_zero.services.file_system.policy import resolve_incoming_attachment_mode
-from holo_cortex_zero.services.media_link import fetch_netease_audio_from_message
 from holo_cortex_zero.schemas.user import UserCreate
 from holo_cortex_zero.services.message_service import message_service
 from holo_cortex_zero.services.user.util import user_register
@@ -111,34 +108,6 @@ async def collect_message(
     if platform_message.is_self:
         logger.info(f'接收自身消息 "{platform_message.content_text}"，跳过...')
         return
-
-    if canonical.is_primary_advanced_user:
-        channel_type_value = getattr(platform_channel.channel_type, "value", platform_channel.channel_type)
-        ingest_mode, ingest_reason = resolve_incoming_attachment_mode(
-            adapter_key=adapter.key,
-            chat_key=db_chat_channel.chat_key,
-            chat_type=str(channel_type_value or ""),
-            sender_id=platform_user.user_id,
-            platform_userid=platform_user.user_id,
-            attachment_kind="audio",
-            channel_type=str(channel_type_value or ""),
-        )
-        if ingest_mode == "managed":
-            max_bytes = int(getattr(config, "MAX_UPLOAD_SIZE_MB", 10) or 10) * 1024 * 1024
-            audio_segment = await fetch_netease_audio_from_message(
-                platform_message,
-                from_chat_key=db_chat_channel.chat_key,
-                max_bytes=max_bytes,
-            )
-            if audio_segment:
-                platform_message.content_data.append(audio_segment)
-                logger.info(
-                    "netease audio segment appended: adapter=%s chat_type=%s mode=%s reason=%s",
-                    adapter.key,
-                    channel_type_value,
-                    ingest_mode,
-                    ingest_reason,
-                )
 
     chat_message: ChatMessage = ChatMessage(
         message_id=platform_message.message_id,

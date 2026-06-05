@@ -42,6 +42,7 @@ from holo_cortex_zero.schemas.chat_message import (
     build_reference_segment,
     extract_primary_reference_segment,
 )
+from holo_cortex_zero.services.media_link import append_netease_audio_from_message
 from holo_cortex_zero.tools.common_util import download_file_from_bytes
 
 
@@ -133,6 +134,16 @@ class MessageProcessor:
         )
         if platform_message.ext_data:
             platform_message.ext_data.native_voice = bool(message.voice)
+        policy_chat_key, policy_sender_id = self._preview_canonical_attachment_identity(message)
+        await append_netease_audio_from_message(
+            platform_message,
+            adapter_key=self.adapter.key,
+            chat_key=policy_chat_key,
+            chat_type=chat_type.value,
+            sender_id=policy_sender_id,
+            platform_userid=policy_sender_id,
+            max_bytes=int(getattr(config, "MAX_UPLOAD_SIZE_MB", 10) or 10) * 1024 * 1024,
+        )
 
         # 收集消息
         from holo_cortex_zero.adapters.interface.collector import collect_message

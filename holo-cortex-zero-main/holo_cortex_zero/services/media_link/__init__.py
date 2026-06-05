@@ -1,3 +1,3 @@
-from .netease_cloud import fetch_netease_audio_from_message
+from .netease_cloud import append_netease_audio_from_message, fetch_netease_audio_from_message
 
-__all__ = ["fetch_netease_audio_from_message"]
+__all__ = ["append_netease_audio_from_message", "fetch_netease_audio_from_message"]
