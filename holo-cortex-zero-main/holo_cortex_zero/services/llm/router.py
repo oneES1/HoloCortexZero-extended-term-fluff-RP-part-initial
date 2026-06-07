@@ -41,10 +41,13 @@ from .responses import ResponsesEmitter
 
 MEDIA_POLICY_INTERNAL_PREFIX = "__hcz_"
 MEDIA_POLICY_IMAGE_MAX_COUNT_KEY = "__hcz_image_max_count"
+MEDIA_POLICY_IMAGE_MAX_LONG_EDGE_KEY = "__hcz_image_max_long_edge"
+MEDIA_POLICY_LEGACY_CHAT_IMAGE_MAX_LONG_EDGE_KEY = "local_chat_image_max_long_edge"
 MEDIA_POLICY_IMAGE_INLINE_MAX_BYTES = 25_000_000
 MEDIA_POLICY_TOOL_VIDEO_MAX_INLINE_BYTES = 8_000_000
 MEDIA_POLICY_TOOL_VIDEO_MAX_DURATION_SECONDS = 60
 MEDIA_POLICY_TOOL_VIDEO_MAX_COUNT = 1
+MEDIA_POLICY_DEFAULT_IMAGE_MAX_LONG_EDGE = 2048
 MODEL_GROUP_WIRE_API_DEFAULT = "default"
 MODEL_GROUP_WIRE_API_CHOICES = {"default", "chat", "responses", "gemini"}
 UNI_GROK_COMPAT_HOSTS = set(UNIAPI_HOSTS)
@@ -316,6 +319,57 @@ class LLMRouter:
             )
             return mime_type, data, False
 
+    @staticmethod
+    def _normalize_image_bytes_to_long_edge(
+        *,
+        mime_type: str,
+        data: bytes,
+        source: str,
+        max_long_edge: int,
+    ) -> tuple[str, bytes, bool]:
+        mime = str(mime_type or "image/png").strip().lower() or "image/png"
+        if not data or not mime.startswith("image/"):
+            return mime_type, data, False
+
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                image = ImageOps.exif_transpose(image)
+                width, height = image.size
+                if max(width, height) <= max_long_edge:
+                    if mime == "image/jpg":
+                        return "image/jpeg", data, True
+                    return mime_type, data, False
+
+                resized = image.copy()
+                resized.thumbnail((max_long_edge, max_long_edge), Image.Resampling.LANCZOS)
+                new_width, new_height = resized.size
+
+                has_alpha = "A" in resized.getbands() or "transparency" in resized.info
+                output = io.BytesIO()
+                if has_alpha:
+                    output_mime = "image/png"
+                    resized.save(output, format="PNG")
+                else:
+                    output_mime = "image/jpeg"
+                    if resized.mode not in {"RGB", "L"}:
+                        resized = resized.convert("RGB")
+                    resized.save(output, format="JPEG", quality=90, optimize=True)
+
+                normalized = output.getvalue()
+                logger.info(
+                    "LLM media policy image long-edge normalization applied: "
+                    f"source={source} size={width}x{height}->{new_width}x{new_height} "
+                    f"mime={mime}->{output_mime} bytes={len(data)}->{len(normalized)} "
+                    f"max_long_edge={max_long_edge}"
+                )
+                return output_mime, normalized, True
+        except Exception as exc:
+            logger.warning(
+                "LLM media policy image long-edge normalization failed, keep original: "
+                f"source={source} mime={mime} max_long_edge={max_long_edge} err={exc}"
+            )
+            return mime_type, data, False
+
     @classmethod
     def _normalize_images_for_compat_target_in_place(
         cls,
@@ -357,6 +411,47 @@ class LLMRouter:
             )
 
         return converted
+
+    @classmethod
+    def _normalize_images_to_max_long_edge_in_place(
+        cls,
+        messages: list[MessageTurn],
+        *,
+        context_id: str,
+        protocol: str,
+        model: str,
+        max_long_edge: int,
+    ) -> int:
+        normalized = 0
+        for turn_index, turn in enumerate(messages):
+            for part_index, part in enumerate(turn.parts):
+                if part.type != "image" or part.data is None:
+                    continue
+                source = f"turn={turn_index}:part={part_index}:{cls._image_name_from_part(part)}"
+                normalized_mime, normalized_data, changed = cls._normalize_image_bytes_to_long_edge(
+                    mime_type=str(part.mime_type or "image/png"),
+                    data=part.data,
+                    source=source,
+                    max_long_edge=max_long_edge,
+                )
+                if not changed:
+                    continue
+                turn.parts[part_index] = MessagePart(
+                    type="image",
+                    data=normalized_data,
+                    mime_type=normalized_mime,
+                    detail=part.detail,
+                    meta=cls._part_meta(part),
+                )
+                normalized += 1
+
+        if normalized > 0:
+            logger.info(
+                "LLM media policy image long-edge summary: "
+                f"ctx={context_id} protocol={protocol} model={model} max_long_edge={max_long_edge} normalized={normalized}"
+            )
+
+        return normalized
 
     @staticmethod
     def _clone_part(part: MessagePart) -> MessagePart:
@@ -426,11 +521,35 @@ class LLMRouter:
         return max(parsed, 0)
 
     @staticmethod
+    def _extract_image_max_long_edge(extra_params: Dict[str, Any]) -> int:
+        raw = extra_params.get(MEDIA_POLICY_IMAGE_MAX_LONG_EDGE_KEY)
+        if raw is None or raw == "":
+            raw = extra_params.get(MEDIA_POLICY_LEGACY_CHAT_IMAGE_MAX_LONG_EDGE_KEY)
+        if raw is None or raw == "":
+            return MEDIA_POLICY_DEFAULT_IMAGE_MAX_LONG_EDGE
+        try:
+            parsed = int(raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "LLM media policy ignore invalid image max long edge, fallback default: "
+                f"value={raw} default={MEDIA_POLICY_DEFAULT_IMAGE_MAX_LONG_EDGE}"
+            )
+            return MEDIA_POLICY_DEFAULT_IMAGE_MAX_LONG_EDGE
+        if parsed <= 0:
+            logger.warning(
+                "LLM media policy ignore non-positive image max long edge, fallback default: "
+                f"value={raw} default={MEDIA_POLICY_DEFAULT_IMAGE_MAX_LONG_EDGE}"
+            )
+            return MEDIA_POLICY_DEFAULT_IMAGE_MAX_LONG_EDGE
+        return parsed
+
+    @staticmethod
     def _strip_internal_extra_params(extra_params: Dict[str, Any]) -> Dict[str, Any]:
         return {
             key: value
             for key, value in extra_params.items()
             if not str(key or "").startswith(MEDIA_POLICY_INTERNAL_PREFIX)
+            and key != MEDIA_POLICY_LEGACY_CHAT_IMAGE_MAX_LONG_EDGE_KEY
         }
 
     @classmethod
@@ -1438,6 +1557,7 @@ class LLMRouter:
     ) -> GenerationRequest:
         extra_params = dict(request.extra_params) if isinstance(request.extra_params, dict) else {}
         image_max_count = self._extract_internal_image_max_count(extra_params)
+        image_max_long_edge = self._extract_image_max_long_edge(extra_params)
         sanitized_extra_params = self._strip_internal_extra_params(extra_params)
         has_images = any(
             any(part.type == "image" for part in turn.parts)
@@ -1481,6 +1601,15 @@ class LLMRouter:
                 protocol=protocol,
                 base_url=base_url,
                 model=request.model,
+            )
+            # 主干：所有协议、所有模型统一执行最长边约束；协议 emitter 只负责 wire format。
+            # 分支兼容：旧 chat 参数名只作为输入别名，在路由层剥离，避免变成供应商并行主干。
+            self._normalize_images_to_max_long_edge_in_place(
+                prepared.messages,
+                context_id=request.context_id,
+                protocol=protocol,
+                model=request.model,
+                max_long_edge=image_max_long_edge,
             )
 
         if has_user_media:

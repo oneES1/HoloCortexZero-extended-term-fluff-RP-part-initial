@@ -8,6 +8,7 @@ from holo_cortex_zero.core.logger import logger
 
 MODEL_GROUP_IMAGE_MAX_COUNT_EXTRA_KEY = "__hcz_image_max_count"
 MODEL_GROUP_CACHE_TRANSPORT_PROFILE_EXTRA_KEY = "__hcz_cache_transport_profile"
+MODEL_GROUP_IMAGE_MAX_LONG_EDGE_EXTRA_KEY = "__hcz_image_max_long_edge"
 MODEL_GROUP_REPLAY_REASONING_CONTENT_EXTRA_KEY = "replay_reasoning_content"
 
 

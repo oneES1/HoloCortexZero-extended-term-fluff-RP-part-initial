@@ -58,7 +58,6 @@ from .reasoning_text import (
 
 
 VLLM_MAX_IMAGE_LONG_EDGE = 2048
-LOCAL_VLLM_FIXED_IMAGE_MAX_LONG_EDGE = 640
 LOCAL_OPENAI_COMPAT_HOSTS = {
     "127.0.0.1",
     "::1",
@@ -786,12 +785,6 @@ class ResponsesEmitter(BaseEmitter):
         return host in LOCAL_OPENAI_COMPAT_HOSTS
 
     @staticmethod
-    def _select_image_max_long_edge(total_user_images: int, *, base_url: str = "") -> int:
-        if ResponsesEmitter._is_local_vllm_base_url(base_url):
-            return LOCAL_VLLM_FIXED_IMAGE_MAX_LONG_EDGE
-        return VLLM_MAX_IMAGE_LONG_EDGE
-
-    @staticmethod
     def _normalize_message_role(role: str) -> str:
         normalized = str(role or "").strip().lower()
         if normalized in RESPONSES_MESSAGE_ROLES:
@@ -1202,14 +1195,6 @@ class ResponsesEmitter(BaseEmitter):
     ) -> Dict[str, Any]:
         """将 GenerationRequest 转为 /responses 请求体"""
         input_items: List[Dict[str, Any]] = []
-        total_user_images = self._count_user_images(request)
-        image_max_long_edge = self._select_image_max_long_edge(total_user_images, base_url=base_url)
-        if image_max_long_edge != VLLM_MAX_IMAGE_LONG_EDGE:
-            logger.info(
-                "[responses][image] apply local vllm fixed image budget: "
-                f"user_images={total_user_images} max_long_edge={image_max_long_edge} "
-                f"base_url={base_url}"
-            )
 
         normalized_messages = self._merge_leading_system_turns(request.messages)
         tool_name_by_call_id = self._build_tool_name_by_call_id(request)
@@ -1220,7 +1205,7 @@ class ResponsesEmitter(BaseEmitter):
         for turn in normalized_messages:
             items = self._turn_to_input_items(
                 turn,
-                image_max_long_edge=image_max_long_edge,
+                image_max_long_edge=VLLM_MAX_IMAGE_LONG_EDGE,
                 tool_result_mode=tool_result_mode,
                 tool_name_by_call_id=tool_name_by_call_id,
                 replay_reasoning_content=replay_reasoning_content,

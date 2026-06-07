@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import io
 import json
 import mimetypes
 import uuid
@@ -17,8 +16,6 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
-from PIL import Image, ImageOps
-
 from holo_cortex_zero.core.logger import logger
 from holo_cortex_zero.core.uniapi_hosts import UNIAPI_HOSTS
 from holo_cortex_zero.schemas.ir import (
@@ -59,7 +56,6 @@ DEEPSEEK_OFFICIAL_CACHE_TRANSPORT_FIELD_KEYS = (
 )
 CHAT_INTERNAL_REASONING_CONTENT_KEY = "__hcz_reasoning_content"
 CHAT_REPLAY_REASONING_CONTENT_KEY = "replay_reasoning_content"
-LOCAL_CHAT_IMAGE_MAX_LONG_EDGE_EXTRA_KEY = "local_chat_image_max_long_edge"
 LOCAL_OPENAI_COMPAT_HOSTS = {
     "127.0.0.1",
     "::1",
@@ -593,19 +589,6 @@ class OpenAIChatEmitter(BaseEmitter):
             )
 
 
-    @staticmethod
-    def _resolve_image_max_long_edge(request: Optional[GenerationRequest]) -> Optional[int]:
-        if not request or not isinstance(request.extra_params, dict):
-            return None
-        raw_value = request.extra_params.get(LOCAL_CHAT_IMAGE_MAX_LONG_EDGE_EXTRA_KEY)
-        try:
-            parsed = int(raw_value) if raw_value is not None else None
-        except (TypeError, ValueError):
-            return None
-        if parsed is None or parsed <= 0:
-            return None
-        return parsed
-
     def _turn_to_message(self, turn: MessageTurn, *, request: Optional[GenerationRequest] = None) -> Dict[str, Any]:
         """MessageTurn → chat.completions message dict"""
         msg: Dict[str, Any] = {"role": turn.role}
@@ -634,8 +617,7 @@ class OpenAIChatEmitter(BaseEmitter):
                 for tc in turn.tool_calls
             ]
             # assistant with tool_calls may also have text content
-            image_max_long_edge = self._resolve_image_max_long_edge(request)
-            content = self._parts_to_content(turn.parts, degrade_media=True, image_max_long_edge=image_max_long_edge)
+            content = self._parts_to_content(turn.parts, degrade_media=True)
             if content:
                 msg["content"] = content
             else:
@@ -643,8 +625,7 @@ class OpenAIChatEmitter(BaseEmitter):
             return msg
 
         # Regular content
-        image_max_long_edge = self._resolve_image_max_long_edge(request)
-        content = self._parts_to_content(turn.parts, degrade_media=True, image_max_long_edge=image_max_long_edge)
+        content = self._parts_to_content(turn.parts, degrade_media=True)
         msg["content"] = content if content else ""
         return msg
 
@@ -653,7 +634,6 @@ class OpenAIChatEmitter(BaseEmitter):
         parts: List[MessagePart],
         *,
         degrade_media: bool = True,
-        image_max_long_edge: Optional[int] = None,
     ) -> Any:
         """MessagePart 列表 → content 字段
 
@@ -675,7 +655,7 @@ class OpenAIChatEmitter(BaseEmitter):
                 if part.text:
                     content_array.append({"type": "text", "text": part.text})
             elif part.type == "image":
-                image_url = self._resolve_image_url(part, max_long_edge=image_max_long_edge)
+                image_url = self._resolve_image_url(part)
                 if image_url:
                     content_array.append({
                         "type": "image_url",
@@ -690,80 +670,19 @@ class OpenAIChatEmitter(BaseEmitter):
         return content_array if content_array else ""
 
     @staticmethod
-    def _normalize_image_bytes(
-        *,
-        mime_type: str,
-        data: bytes,
-        source: str,
-        max_long_edge: Optional[int] = None,
-    ) -> tuple[str, bytes]:
-        mime = str(mime_type or "image/png").strip().lower() or "image/png"
-        if not mime.startswith("image/") or not data:
-            return mime_type, data
-        try:
-            with Image.open(io.BytesIO(data)) as image:
-                image = ImageOps.exif_transpose(image)
-                width, height = image.size
-                should_resize = bool(max_long_edge and max_long_edge > 0 and max(width, height) > max_long_edge)
-                if not should_resize:
-                    if mime == "image/jpg":
-                        return "image/jpeg", data
-                    return mime_type, data
-                resized = image.copy()
-                resized.thumbnail((max_long_edge, max_long_edge), Image.Resampling.LANCZOS)
-                new_width, new_height = resized.size
-                has_alpha = "A" in resized.getbands() or "transparency" in resized.info
-                output = io.BytesIO()
-                if has_alpha:
-                    output_mime = "image/png"
-                    resized.save(output, format="PNG")
-                else:
-                    output_mime = "image/jpeg"
-                    if resized.mode not in {"RGB", "L"}:
-                        resized = resized.convert("RGB")
-                    resized.save(output, format="JPEG", quality=90, optimize=True)
-                normalized = output.getvalue()
-                reasons = []
-                if should_resize:
-                    reasons.append("oversized")
-                logger.info(
-                    "[openai_chat][image] normalized image for chat target: "
-                    f"reason={'+'.join(reasons)} "
-                    f"source={source} size={width}x{height} -> {new_width}x{new_height} "
-                    f"mime={mime} -> {output_mime} bytes={len(data)} -> {len(normalized)}"
-                )
-                return output_mime, normalized
-        except Exception as exc:
-            logger.warning(
-                "[openai_chat][image] normalize image failed, keep original: "
-                f"source={source} mime={mime} err={exc}"
-            )
-            return mime_type, data
-
-    @staticmethod
-    def _resolve_image_url(part: MessagePart, *, max_long_edge: Optional[int] = None) -> Optional[str]:
+    def _resolve_image_url(part: MessagePart) -> Optional[str]:
         """将 MessagePart 的图片数据解析为 URL 或 data URI"""
         if part.data:
-            mime = part.mime_type or "image/png"
-            mime, normalized = OpenAIChatEmitter._normalize_image_bytes(
-                mime_type=mime,
-                data=part.data,
-                source="inline",
-                max_long_edge=max_long_edge,
-            )
-            b64 = base64.b64encode(normalized).decode("ascii")
+            mime = "image/jpeg" if str(part.mime_type or "").lower() == "image/jpg" else part.mime_type or "image/png"
+            b64 = base64.b64encode(part.data).decode("ascii")
             return f"data:{mime};base64,{b64}"
         if part.url:
             if part.url.startswith("/") and Path(part.url).exists():
                 path = Path(part.url)
                 mime = mimetypes.guess_type(str(path))[0] or "image/png"
-                mime, normalized = OpenAIChatEmitter._normalize_image_bytes(
-                    mime_type=mime,
-                    data=path.read_bytes(),
-                    source=str(path),
-                    max_long_edge=max_long_edge,
-                )
-                b64 = base64.b64encode(normalized).decode("ascii")
+                if str(mime).lower() == "image/jpg":
+                    mime = "image/jpeg"
+                b64 = base64.b64encode(path.read_bytes()).decode("ascii")
                 return f"data:{mime};base64,{b64}"
             return part.url
         return None
