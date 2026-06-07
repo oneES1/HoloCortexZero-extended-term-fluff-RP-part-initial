@@ -154,7 +154,14 @@ class SystemMomentService:
         )
         return result
 
-    async def tool_echo(self, context_id: str, primary_user_id: str, when: int | str, reason: str = "") -> bool:
+    async def tool_echo(
+        self,
+        context_id: str,
+        primary_user_id: str,
+        when: int | str | None = None,
+        reason: str = "",
+        **kwargs: Any,
+    ) -> bool:
         """把回声放进未来。
 
         Args:
@@ -167,11 +174,12 @@ class SystemMomentService:
         Example:
             echo(when=600, reason="十分钟后提醒我收衣服")
         """
+        resolved_when, resolved_reason = self._resolve_echo_tool_args(when=when, reason=reason, extra_args=kwargs)
         return await self.schedule_echo(
             context_id=context_id,
             primary_user_id=primary_user_id,
-            when=when,
-            purpose_text=reason,
+            when=resolved_when,
+            purpose_text=resolved_reason,
         )
 
     def _register_tools_once(self) -> None:
@@ -452,6 +460,66 @@ class SystemMomentService:
     def _prune_records(records: list[_MomentRecord], *, now: int | None = None) -> list[_MomentRecord]:
         now_ts = int(time.time()) if now is None else int(now)
         return [record for record in records if record.trigger_time > now_ts - 86400]
+
+    @classmethod
+    def _resolve_echo_tool_args(cls, *, when: Any, reason: Any, extra_args: dict[str, Any]) -> tuple[Any, str]:
+        candidates: list[tuple[str, Any]] = [("when", when)]
+        preferred_time_keys = (
+            "echo",
+            "seconds",
+            "time",
+            "datetime",
+            "date",
+            "at",
+            "when_at",
+            "remind_at",
+            "reminder_time",
+            "delay",
+            "after",
+        )
+        for key in preferred_time_keys:
+            if key in extra_args:
+                candidates.append((key, extra_args[key]))
+        for key, value in extra_args.items():
+            if key not in preferred_time_keys:
+                candidates.append((key, value))
+
+        selected_key = ""
+        selected_when: Any = None
+        first_error: Exception | None = None
+        for key, value in candidates:
+            if value is None or str(value).strip() == "":
+                continue
+            try:
+                cls._parse_echo_when(value)
+            except ValueError as exc:
+                if first_error is None:
+                    first_error = exc
+                continue
+            selected_key = key
+            selected_when = value
+            break
+
+        if selected_when is None:
+            if first_error is not None:
+                raise first_error
+            raise ValueError("echo.when 不能为空")
+
+        resolved_reason = str(reason or "").strip()
+        if not resolved_reason:
+            reason_keys = ("reason", "purpose", "purpose_text", "message", "text", "content", "note")
+            for key in reason_keys:
+                value = extra_args.get(key)
+                if key == selected_key or value is None:
+                    continue
+                text = str(value).strip()
+                if text:
+                    resolved_reason = text
+                    break
+
+        if selected_key != "when":
+            logger.info(f"system_moment echo 使用鲁棒字段解析 when: field={selected_key}")
+        return selected_when, resolved_reason
 
     @staticmethod
     def _log_preview(text: str, limit: int = 120) -> str:

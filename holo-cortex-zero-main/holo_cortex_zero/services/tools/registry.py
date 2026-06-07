@@ -434,7 +434,13 @@ class ToolRegistry:
             runtime_env = _build_tool_runtime_env(runtime_binding)
             current_tool_config = tool.get_config()
 
+            explicit_param_names: set[str] = set()
+            accepts_unknown_kwargs = False
             for param_name, param in sig.parameters.items():
+                if param.kind is inspect.Parameter.VAR_KEYWORD:
+                    accepts_unknown_kwargs = True
+                    continue
+                explicit_param_names.add(param_name)
                 if param_name == "tool_config":
                     kwargs[param_name] = current_tool_config
                 elif param_name in _RUNTIME_HIDDEN_PARAM_NAMES:
@@ -448,6 +454,14 @@ class ToolRegistry:
                     kwargs[param_name] = call.arguments[param_name]
                 elif param.default is inspect.Parameter.empty:
                     kwargs[param_name] = call.arguments.get(param_name)
+
+            if accepts_unknown_kwargs:
+                for arg_name, arg_value in call.arguments.items():
+                    if not isinstance(arg_name, str):
+                        continue
+                    if arg_name in explicit_param_names or arg_name in _RUNTIME_HIDDEN_PARAM_NAMES:
+                        continue
+                    kwargs[arg_name] = arg_value
 
             result = await tool.handler(**kwargs)
             normalized_result = _normalize_tool_result(call_id=call.id, result=result)
