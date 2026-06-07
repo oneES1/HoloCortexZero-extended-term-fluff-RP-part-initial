@@ -44,9 +44,13 @@ class MessageService:
     _CLEAR_COMMAND = "/clear"
     _CLEAR_ALL_COMMAND = "/clearall"
     _TEST_COMMAND = "/test"
+    _UNLOCK_COMMAND = "/unlock"
     _CLEAR_ACK_TEXT = "杂乱已清除"
     _CLEAR_ALL_ACK_TEXT = "杂乱与压缩记忆已清除"
     _CLEAR_BUSY_TEXT = "当前还有任务在跑，稍后再清理"
+    _UNLOCK_USAGE_TEXT = "用法：/unlock 用户ID"
+    _UNLOCK_DONE_TEXT = "已解封"
+    _UNLOCK_NOT_FOUND_TEXT = "用户不存在"
 
     def __init__(self):
         # 全局状态追踪
@@ -199,6 +203,15 @@ class MessageService:
     @classmethod
     def _is_test_command(cls, text: Any) -> bool:
         return str(text or "").strip() == cls._TEST_COMMAND
+
+    @classmethod
+    def _parse_unlock_user_id(cls, text: Any) -> tuple[bool, Optional[int]]:
+        parts = str(text or "").strip().split()
+        if not parts or parts[0] != cls._UNLOCK_COMMAND:
+            return False, None
+        if len(parts) != 2 or not parts[1].isdigit():
+            return True, None
+        return True, int(parts[1])
 
     @staticmethod
     def _get_message_segment_type(segment: Any) -> str:
@@ -697,8 +710,9 @@ class MessageService:
         clear_command = self._is_clear_command(message.content_text)
         clear_all_command = self._is_clear_all_command(message.content_text)
         test_command = self._is_test_command(message.content_text)
+        unlock_command, unlock_user_id = self._parse_unlock_user_id(message.content_text)
 
-        if not mode_command and not clear_command and not clear_all_command and not test_command and check_forbidden_message(message.content_text, config):
+        if not mode_command and not clear_command and not clear_all_command and not test_command and not unlock_command and check_forbidden_message(message.content_text, config):
             logger.info(f"消息 {message.content_text} 被禁止，跳过本次处理...")
             return
 
@@ -730,10 +744,11 @@ class MessageService:
         owner_type = "normal"
         active_dialog_id = ""
         context_user_id = self._get_message_context_user_id(message)
-        if (mode_command or clear_command or clear_all_command or test_command) and not context_window_manager._is_advanced_sender(context_user_id):
+        if (mode_command or clear_command or clear_all_command or test_command or unlock_command) and not context_window_manager._is_advanced_sender(context_user_id):
             command_text = (
                 mode_command.command if mode_command else
                 self._TEST_COMMAND if test_command else
+                self._UNLOCK_COMMAND if unlock_command else
                 self._CLEAR_ALL_COMMAND if clear_all_command else
                 self._CLEAR_COMMAND
             )
@@ -755,6 +770,23 @@ class MessageService:
                 active_dialog_id = context_window.active_dialog_id or ""
             except Exception as e:
                 logger.error(f"解析上下文窗口失败，回退 chat_key 调度: {e}", exc_info=True)
+
+        if unlock_command:
+            if not context_window or not context_window_manager.is_advanced_window(context_window):
+                return
+            if unlock_user_id is None:
+                await self._send_plain_text_to_chat(chat_key=message.chat_key, text=self._UNLOCK_USAGE_TEXT)
+                return
+
+            target_user = await DBUser.get_or_none(id=unlock_user_id)
+            if target_user is None:
+                await self._send_plain_text_to_chat(chat_key=message.chat_key, text=self._UNLOCK_NOT_FOUND_TEXT)
+                return
+
+            target_user.ban_until = None
+            await target_user.save(update_fields=["ban_until", "update_time"])
+            await self._send_plain_text_to_chat(chat_key=message.chat_key, text=self._UNLOCK_DONE_TEXT)
+            return
 
         if test_command:
             # 分支兼容：高级用户可手动触发当前群聊普通 context 回复，但不落消息记录。
