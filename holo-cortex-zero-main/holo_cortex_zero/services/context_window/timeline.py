@@ -46,7 +46,7 @@ class TimelineService:
 
         # 配置（从 yaml 加载）
         self.summary_model_group: str = ""
-        self.llm_max_tokens: int = 2000
+        self.llm_max_tokens: Optional[int] = None
         self.llm_timeout_seconds: float = 120.0
         self.time_bucket_minutes: int = 15
 

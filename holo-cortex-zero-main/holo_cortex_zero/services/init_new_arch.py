@@ -120,5 +120,4 @@ def _load_config() -> None:
         logger.warning("Timeline 压缩未启用：模型组 %s 不存在。", timeline_group)
         return
     timeline_service.summary_model_group = timeline_group
-    timeline_service.llm_max_tokens = 3000
     timeline_service.llm_timeout_seconds = 600.0
