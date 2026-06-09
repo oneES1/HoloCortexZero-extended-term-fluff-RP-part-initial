@@ -1535,38 +1535,93 @@ class CoreConfig(ConfigBase):
     ADVANCED_AUTO_ECHO_ENABLED: bool = Field(
         default=False,
         title='启用高级用户自动 echo 回复',
-        description='启用后仅对高级用户 context_id 自动创建 echo 定时触发回复。',
-        json_schema_extra=ExtraField(is_hidden=True).model_dump(),
+        description='启用后仅对高级用户 context_id 自动创建 echo 定时触发回复；从关闭改为开启后需要重启应用。',
+        json_schema_extra=ExtraField(
+            is_need_restart=True,
+            i18n_title=i18n_text(
+                zh_CN='启用高级用户自动 echo 回复',
+                en_US='Enable Advanced Auto Echo Replies',
+            ),
+            i18n_description=i18n_text(
+                zh_CN='启用后仅对高级用户 context_id 自动创建 echo 定时触发回复；从关闭改为开启后需要重启应用。',
+                en_US='Automatically schedules echo wakeups only for the advanced context. Restart the app after enabling it from off.',
+            ),
+        ).model_dump(),
     )
     ADVANCED_AUTO_ECHO_START_TIME: str = Field(
         default='06:00',
         title='高级用户自动 echo 每日开始时间',
         description='HH:MM，本地时间。',
-        json_schema_extra=ExtraField(is_hidden=True).model_dump(),
+        json_schema_extra=ExtraField(
+            i18n_title=i18n_text(
+                zh_CN='高级用户自动 echo 每日开始时间',
+                en_US='Advanced Auto Echo Daily Start Time',
+            ),
+            i18n_description=i18n_text(
+                zh_CN='HH:MM，本地时间。',
+                en_US='HH:MM in local time.',
+            ),
+        ).model_dump(),
     )
     ADVANCED_AUTO_ECHO_END_TIME: str = Field(
         default='23:00',
         title='高级用户自动 echo 每日截止时间',
         description='HH:MM，本地时间。',
-        json_schema_extra=ExtraField(is_hidden=True).model_dump(),
+        json_schema_extra=ExtraField(
+            i18n_title=i18n_text(
+                zh_CN='高级用户自动 echo 每日截止时间',
+                en_US='Advanced Auto Echo Daily End Time',
+            ),
+            i18n_description=i18n_text(
+                zh_CN='HH:MM，本地时间。',
+                en_US='HH:MM in local time.',
+            ),
+        ).model_dump(),
     )
     ADVANCED_AUTO_ECHO_MIN_INTERVAL_SECONDS: int = Field(
         default=3600,
         title='高级用户自动 echo 最小间隔秒数',
         description='后续自动 echo 距离高级用户最近发言的最小等待秒数。',
-        json_schema_extra=ExtraField(is_hidden=True).model_dump(),
+        json_schema_extra=ExtraField(
+            i18n_title=i18n_text(
+                zh_CN='高级用户自动 echo 最小间隔秒数',
+                en_US='Advanced Auto Echo Minimum Interval Seconds',
+            ),
+            i18n_description=i18n_text(
+                zh_CN='后续自动 echo 距离高级用户最近发言的最小等待秒数。',
+                en_US='Minimum delay between the latest advanced-user message and the next automatic echo.',
+            ),
+        ).model_dump(),
     )
     ADVANCED_AUTO_ECHO_SAMPLE_WINDOW_SECONDS: int = Field(
         default=14400,
         title='高级用户自动 echo 随机采样窗口秒数',
         description='自动 echo 触发点随机采样窗口长度。',
-        json_schema_extra=ExtraField(is_hidden=True).model_dump(),
+        json_schema_extra=ExtraField(
+            i18n_title=i18n_text(
+                zh_CN='高级用户自动 echo 随机采样窗口秒数',
+                en_US='Advanced Auto Echo Random Sample Window Seconds',
+            ),
+            i18n_description=i18n_text(
+                zh_CN='自动 echo 触发点随机采样窗口长度。',
+                en_US='Random sampling window length for automatic echo trigger time.',
+            ),
+        ).model_dump(),
     )
     ADVANCED_AUTO_ECHO_PATROL_INTERVAL_SECONDS: int = Field(
         default=60,
         title='高级用户自动 echo 巡检间隔秒数',
         description='后台检查是否需要创建下一次自动 echo 的间隔。',
-        json_schema_extra=ExtraField(is_hidden=True).model_dump(),
+        json_schema_extra=ExtraField(
+            i18n_title=i18n_text(
+                zh_CN='高级用户自动 echo 巡检间隔秒数',
+                en_US='Advanced Auto Echo Patrol Interval Seconds',
+            ),
+            i18n_description=i18n_text(
+                zh_CN='后台检查是否需要创建下一次自动 echo 的间隔。',
+                en_US='Background interval for checking whether the next automatic echo should be scheduled.',
+            ),
+        ).model_dump(),
     )
     SYSTEM_VOICE_ENABLED: bool = Field(
         default=True,
