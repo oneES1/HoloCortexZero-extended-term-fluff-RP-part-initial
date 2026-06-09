@@ -561,6 +561,14 @@ class MessageService:
         self.pending_trigger_sources[execution_key] = source_scope
         self.debounce_timers[execution_key] = current_time
 
+        if source_scope == "human":
+            try:
+                from holo_cortex_zero.services.moment import system_moment_service
+
+                await system_moment_service.mark_advanced_human_agent_scheduled(context_id=execution_key)
+            except Exception as e:
+                logger.warning("advanced_auto_echo human schedule hook failed: %s", e.__class__.__name__)
+
         # 如果已有正在执行的任务，直接返回
         if execution_key in self.running_tasks and not self.running_tasks[execution_key].done():
             return
@@ -617,7 +625,7 @@ class MessageService:
         # 获取最终要处理的消息
         final_message = self.pending_messages.pop(execution_key, None)
         final_ctx = self.pending_contexts.pop(execution_key, None)
-        self.pending_trigger_sources.pop(execution_key, None)
+        source_scope = self.pending_trigger_sources.pop(execution_key, "system")
         if not final_message:
             return
 
@@ -639,6 +647,7 @@ class MessageService:
         chat_key: str,
         message: Optional[ChatMessage] = None,
         ctx: Optional[AgentCtx] = None,
+        source_scope: str = "system",
     ):
         """执行agent任务
 
@@ -654,12 +663,14 @@ class MessageService:
         if message and processing_with_emoji and message.message_id:
             await adapter.set_message_reaction(message.message_id, True)
 
+        agent_success = True
         try:
             from holo_cortex_zero.services.agent.run_agent_v2 import run_agent_v2
 
             try:
                 await run_agent_v2(chat_key=chat_key, chat_message=message, ctx=ctx)
             except Exception as e:
+                agent_success = False
                 logger.exception(f"run_agent_v2 执行失败: {e}")
         finally:
             # 清理任务状态
@@ -668,12 +679,23 @@ class MessageService:
 
             final_message = self.pending_messages.pop(execution_key, None)
             final_ctx = self.pending_contexts.pop(execution_key, None)
-            self.pending_trigger_sources.pop(execution_key, None)
+            final_source_scope = self.pending_trigger_sources.pop(execution_key, "system")
             self.debounce_timers.pop(execution_key, None)
 
             # 取消处理emoji（如果设置过）
             if processing_with_emoji and message and message.message_id:
                 await adapter.set_message_reaction(message.message_id, False)
+
+            if not final_message and source_scope == "human":
+                try:
+                    from holo_cortex_zero.services.moment import system_moment_service
+
+                    await system_moment_service.mark_advanced_agent_finished(
+                        context_id=execution_key,
+                        success=agent_success,
+                    )
+                except Exception as e:
+                    logger.warning("advanced_auto_echo agent finish hook failed: %s", e.__class__.__name__)
 
             # 如果有待处理消息，创建新的任务处理最后一条消息
             if final_message:
@@ -684,6 +706,7 @@ class MessageService:
                         chat_key=next_chat_key,
                         message=final_message if not final_message.is_empty() else None,
                         ctx=final_ctx,
+                        source_scope=final_source_scope,
                     )
                 )
                 self.running_tasks[execution_key] = new_task
@@ -893,6 +916,17 @@ class MessageService:
             ext_data=json.dumps(message.ext_data, ensure_ascii=False),
             send_timestamp=int(time.time()),  # 使用处理后的时间戳
         )
+
+        if context_window and context_window_manager.is_advanced_window(context_window):
+            try:
+                from holo_cortex_zero.services.moment import system_moment_service
+
+                await system_moment_service.mark_advanced_user_activity(
+                    context_id=context_id,
+                    message_ts=int(getattr(db_message, "send_timestamp", 0) or time.time()),
+                )
+            except Exception as e:
+                logger.warning("advanced_auto_echo user activity hook failed: %s", e.__class__.__name__)
 
         should_ignore = (user and user.is_prevent_trigger) or (user and not user.is_active)
 
