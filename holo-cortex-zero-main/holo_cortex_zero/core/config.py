@@ -1532,6 +1532,42 @@ class CoreConfig(ConfigBase):
             is_hidden=True,
         ).model_dump(),
     )
+    ADVANCED_AUTO_ECHO_ENABLED: bool = Field(
+        default=False,
+        title='启用高级用户自动 echo 回复',
+        description='启用后仅对高级用户 context_id 自动创建 echo 定时触发回复。',
+        json_schema_extra=ExtraField(is_hidden=True).model_dump(),
+    )
+    ADVANCED_AUTO_ECHO_START_TIME: str = Field(
+        default='06:00',
+        title='高级用户自动 echo 每日开始时间',
+        description='HH:MM，本地时间。',
+        json_schema_extra=ExtraField(is_hidden=True).model_dump(),
+    )
+    ADVANCED_AUTO_ECHO_END_TIME: str = Field(
+        default='23:00',
+        title='高级用户自动 echo 每日截止时间',
+        description='HH:MM，本地时间。',
+        json_schema_extra=ExtraField(is_hidden=True).model_dump(),
+    )
+    ADVANCED_AUTO_ECHO_MIN_INTERVAL_SECONDS: int = Field(
+        default=3600,
+        title='高级用户自动 echo 最小间隔秒数',
+        description='后续自动 echo 距离高级用户最近发言的最小等待秒数。',
+        json_schema_extra=ExtraField(is_hidden=True).model_dump(),
+    )
+    ADVANCED_AUTO_ECHO_SAMPLE_WINDOW_SECONDS: int = Field(
+        default=14400,
+        title='高级用户自动 echo 随机采样窗口秒数',
+        description='自动 echo 触发点随机采样窗口长度。',
+        json_schema_extra=ExtraField(is_hidden=True).model_dump(),
+    )
+    ADVANCED_AUTO_ECHO_PATROL_INTERVAL_SECONDS: int = Field(
+        default=60,
+        title='高级用户自动 echo 巡检间隔秒数',
+        description='后台检查是否需要创建下一次自动 echo 的间隔。',
+        json_schema_extra=ExtraField(is_hidden=True).model_dump(),
+    )
     SYSTEM_VOICE_ENABLED: bool = Field(
         default=True,
         title="启用系统语音后处理",
