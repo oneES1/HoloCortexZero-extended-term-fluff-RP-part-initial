@@ -924,7 +924,7 @@ class SystemMomentService:
 
     @staticmethod
     def _build_wake_notice(kind: str, purpose_text: str) -> str:
-        return f"echo feedback {str(purpose_text or '').strip()}"
+        return f"echo {str(purpose_text or '').strip()}"
 
     @staticmethod
     def _prune_records(records: list[_MomentRecord], *, now: int | None = None) -> list[_MomentRecord]:
@@ -986,6 +986,8 @@ class SystemMomentService:
                 if text:
                     resolved_reason = text
                     break
+        if not resolved_reason:
+            resolved_reason = str(selected_when or "").strip()
 
         if selected_key != "when":
             logger.info(f"system_moment echo 使用鲁棒字段解析 when: field={selected_key}")
