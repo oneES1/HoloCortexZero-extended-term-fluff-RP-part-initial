@@ -350,7 +350,7 @@ class SystemMomentService:
             if state.get("context_id") != context_id or state.get("day") != day_key:
                 state = {"context_id": context_id, "day": day_key, "phase": "day_wait_start"}
 
-            if now_dt > end_dt:
+            if now_dt >= end_dt:
                 state["phase"] = "day_finished"
                 self._clear_advanced_auto_echo_pending(state)
                 self._save_advanced_auto_echo_state(state)
@@ -372,6 +372,30 @@ class SystemMomentService:
                 self._save_advanced_auto_echo_state(state)
                 return
 
+            if state.get("phase") == "schedule_retry":
+                retry_ts = max(int(state.get("pending_trigger_ts") or 0), now + 60)
+                if retry_ts >= int(end_dt.timestamp()):
+                    state["phase"] = "wait_user_activity"
+                    self._clear_advanced_auto_echo_pending(state)
+                    self._save_advanced_auto_echo_state(state)
+                    return
+                await self._advanced_auto_echo_schedule_at(state, retry_ts)
+                return
+
+            if state.get("phase") == "day_finished":
+                if int(state.get("last_human_agent_scheduled_ts") or 0) > 0:
+                    if await self._advanced_auto_echo_human_reply_finished(context_id=context_id, state=state):
+                        await self._advanced_auto_echo_schedule_after_human_reply(state)
+                        return
+                    state["phase"] = "wait_agent_done"
+                    self._save_advanced_auto_echo_state(state)
+                    return
+                if int(state.get("last_user_message_ts") or 0) > 0:
+                    state["phase"] = "wait_user_activity"
+                    self._save_advanced_auto_echo_state(state)
+                    return
+                state["phase"] = "day_wait_start"
+
             if state.get("phase") == "wait_agent_done":
                 if await self._advanced_auto_echo_human_reply_finished(context_id=context_id, state=state):
                     await self._advanced_auto_echo_schedule_after_human_reply(state)
@@ -379,18 +403,20 @@ class SystemMomentService:
                 self._save_advanced_auto_echo_state(state)
                 return
 
-            if state.get("phase") in {"wait_user_activity", "day_finished"}:
+            if state.get("phase") == "wait_user_activity":
                 self._save_advanced_auto_echo_state(state)
                 return
 
-            lower_ts = max(int(start_dt.timestamp()), now + 60)
-            upper_ts = min(
-                int(start_dt.timestamp()) + self._advanced_auto_echo_sample_window_seconds(),
-                int(end_dt.timestamp()),
+            lower_ts, upper_ts = self._advanced_auto_echo_sample_bounds(
+                anchor_ts=int(start_dt.timestamp()),
+                now_ts=now,
+                end_ts=int(end_dt.timestamp()),
+                sample_window=self._advanced_auto_echo_sample_window_seconds(),
             )
             trigger_ts = self._advanced_auto_echo_sample_timestamp(lower_ts, upper_ts)
             if trigger_ts <= 0:
-                state["phase"] = "day_finished"
+                state["phase"] = "wait_user_activity"
+                self._clear_advanced_auto_echo_pending(state)
                 self._save_advanced_auto_echo_state(state)
                 return
             await self._advanced_auto_echo_schedule_at(state, trigger_ts)
@@ -430,7 +456,7 @@ class SystemMomentService:
             self._save_advanced_auto_echo_state(state)
             return
 
-        if state.get("day") != day_key or now_dt > end_dt:
+        if state.get("day") != day_key or now_dt >= end_dt:
             state["context_id"] = self._advanced_auto_echo_context_id()
             state["day"] = day_key
             state["phase"] = "day_finished"
@@ -447,11 +473,15 @@ class SystemMomentService:
             self._save_advanced_auto_echo_state(state)
             return
 
-        lower_ts = max(base_ts + min_interval, now + 60)
-        upper_ts = min(base_ts + min_interval + sample_window, int(end_dt.timestamp()))
+        lower_ts, upper_ts = self._advanced_auto_echo_sample_bounds(
+            anchor_ts=base_ts + min_interval,
+            now_ts=now,
+            end_ts=int(end_dt.timestamp()),
+            sample_window=sample_window,
+        )
         trigger_ts = self._advanced_auto_echo_sample_timestamp(lower_ts, upper_ts)
         if trigger_ts <= 0:
-            state["phase"] = "day_finished"
+            state["phase"] = "wait_user_activity"
             self._clear_advanced_auto_echo_pending(state)
             self._save_advanced_auto_echo_state(state)
             return
@@ -463,14 +493,20 @@ class SystemMomentService:
         ok = await self.schedule_echo(
             context_id=context_id,
             primary_user_id=context_id,
-            when=reason,
+            when=int(trigger_ts),
             purpose_text=reason,
             ensure_runtime=False,
             silent=True,
         )
         if not ok:
-            state["phase"] = "day_finished"
-            self._clear_advanced_auto_echo_pending(state)
+            state.update(
+                {
+                    "phase": "schedule_retry",
+                    "pending_trigger_ts": max(int(trigger_ts), int(time.time()) + 60),
+                    "pending_reason": reason,
+                }
+            )
+            state.pop("pending_record_id", None)
             self._save_advanced_auto_echo_state(state)
             return
 
@@ -574,12 +610,29 @@ class SystemMomentService:
         return value
 
     @staticmethod
+    def _advanced_auto_echo_sample_bounds(
+        *,
+        anchor_ts: int,
+        now_ts: int,
+        end_ts: int,
+        sample_window: int,
+    ) -> tuple[int, int]:
+        hard_end_ts = int(end_ts) - 1
+        lower_ts = max(int(anchor_ts), int(now_ts) + 60)
+        upper_ts = min(int(anchor_ts) + max(0, int(sample_window)), hard_end_ts)
+        if upper_ts < lower_ts and lower_ts <= hard_end_ts:
+            upper_ts = min(lower_ts + max(0, int(sample_window)), hard_end_ts)
+        return lower_ts, upper_ts
+
+    @staticmethod
     def _advanced_auto_echo_sample_timestamp(lower_ts: int, upper_ts: int) -> int:
-        lower_minute = (int(lower_ts) + 59) // 60
-        upper_minute = int(upper_ts) // 60
-        if upper_minute < lower_minute:
+        lower = int(lower_ts)
+        upper = int(upper_ts)
+        if upper < lower:
             return 0
-        return random.randint(lower_minute, upper_minute) * 60
+        if upper == lower:
+            return lower
+        return random.randint(lower, upper)
 
     @staticmethod
     def _format_advanced_auto_echo_reason(trigger_ts: int) -> str:
