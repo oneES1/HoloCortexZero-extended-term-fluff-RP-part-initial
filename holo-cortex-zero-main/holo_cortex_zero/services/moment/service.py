@@ -372,7 +372,14 @@ class SystemMomentService:
                 self._save_advanced_auto_echo_state(state)
                 return
 
-            if state.get("phase") in {"wait_user_activity", "wait_agent_done", "day_finished"}:
+            if state.get("phase") == "wait_agent_done":
+                if await self._advanced_auto_echo_human_reply_finished(context_id=context_id, state=state):
+                    await self._advanced_auto_echo_schedule_after_human_reply(state)
+                    return
+                self._save_advanced_auto_echo_state(state)
+                return
+
+            if state.get("phase") in {"wait_user_activity", "day_finished"}:
                 self._save_advanced_auto_echo_state(state)
                 return
 
@@ -387,6 +394,28 @@ class SystemMomentService:
                 self._save_advanced_auto_echo_state(state)
                 return
             await self._advanced_auto_echo_schedule_at(state, trigger_ts)
+
+    async def _advanced_auto_echo_human_reply_finished(self, *, context_id: str, state: dict[str, Any]) -> bool:
+        scheduled_ts = int(state.get("last_human_agent_scheduled_ts") or 0)
+        if scheduled_ts <= 0:
+            return False
+
+        from holo_cortex_zero.models.db_context_window import DBContextMessage
+
+        human_msg = await DBContextMessage.filter(
+            context_id=context_id,
+            msg_type="human_chat",
+            created_at__gte=datetime.fromtimestamp(scheduled_ts),
+        ).order_by("-id").first()
+        if human_msg is None:
+            return False
+
+        bot_reply = await DBContextMessage.filter(
+            context_id=context_id,
+            msg_type="bot_reply",
+            id__gt=int(getattr(human_msg, "id", 0) or 0),
+        ).order_by("id").first()
+        return bot_reply is not None
 
     async def _advanced_auto_echo_schedule_after_human_reply(self, state: dict[str, Any]) -> None:
         now = int(time.time())
