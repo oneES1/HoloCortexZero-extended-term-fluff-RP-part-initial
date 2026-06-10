@@ -490,10 +490,11 @@ class SystemMomentService:
     async def _advanced_auto_echo_schedule_at(self, state: dict[str, Any], trigger_ts: int) -> None:
         context_id = self._advanced_auto_echo_context_id()
         reason = self._format_advanced_auto_echo_reason(trigger_ts)
+        when = self._format_advanced_auto_echo_when(trigger_ts)
         ok = await self.schedule_echo(
             context_id=context_id,
             primary_user_id=context_id,
-            when=int(trigger_ts),
+            when=when,
             purpose_text=reason,
             ensure_runtime=False,
             silent=True,
@@ -637,6 +638,10 @@ class SystemMomentService:
     @staticmethod
     def _format_advanced_auto_echo_reason(trigger_ts: int) -> str:
         return datetime.fromtimestamp(int(trigger_ts)).strftime("%Y-%m-%d %H:%M")
+
+    @staticmethod
+    def _format_advanced_auto_echo_when(trigger_ts: int) -> str:
+        return datetime.fromtimestamp(int(trigger_ts)).strftime("%Y-%m-%d %H:%M:%S")
 
     def _advanced_auto_echo_context_id(self) -> str:
         return str(get_primary_advanced_user_id(config) or "").strip()
