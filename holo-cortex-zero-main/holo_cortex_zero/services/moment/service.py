@@ -107,7 +107,7 @@ class SystemMomentService:
                 )
             return result
 
-        normalized_purpose_text = self._normalize_purpose_text(purpose_text, field_name="echo.reason")
+        normalized_purpose_text = str(purpose_text or "").strip()
         now = int(time.time())
         if trigger_time <= now:
             raise ValueError("echo 只能设定在未来的时间点")
@@ -924,7 +924,10 @@ class SystemMomentService:
 
     @staticmethod
     def _build_wake_notice(kind: str, purpose_text: str) -> str:
-        return f"echo {str(purpose_text or '').strip()}"
+        reason = str(purpose_text or "").strip()
+        if reason:
+            return f"我的内部潜意识echo了我 {reason}"
+        return "我的内部潜意识echo了我"
 
     @staticmethod
     def _prune_records(records: list[_MomentRecord], *, now: int | None = None) -> list[_MomentRecord]:
@@ -986,9 +989,6 @@ class SystemMomentService:
                 if text:
                     resolved_reason = text
                     break
-        if not resolved_reason:
-            resolved_reason = str(selected_when or "").strip()
-
         if selected_key != "when":
             logger.info(f"system_moment echo 使用鲁棒字段解析 when: field={selected_key}")
         return selected_when, resolved_reason
