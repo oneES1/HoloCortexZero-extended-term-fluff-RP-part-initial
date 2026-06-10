@@ -924,7 +924,7 @@ class SystemMomentService:
 
     @staticmethod
     def _build_wake_notice(kind: str, purpose_text: str) -> str:
-        return f"⏰ 已到此前设定的 echo 时间。原因：{str(purpose_text or '').strip()}"
+        return f"echo 通知 {str(purpose_text or '').strip()}"
 
     @staticmethod
     def _prune_records(records: list[_MomentRecord], *, now: int | None = None) -> list[_MomentRecord]:
