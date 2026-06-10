@@ -327,6 +327,9 @@ class SystemMomentService:
                 self._clear_advanced_auto_echo_pending(state)
                 self._save_advanced_auto_echo_state(state)
                 return
+            if not await self._advanced_auto_echo_human_reply_finished(context_id=context_id, state=state):
+                self._save_advanced_auto_echo_state(state)
+                return
             await self._advanced_auto_echo_schedule_after_human_reply(state)
 
     async def _advanced_auto_echo_once(self) -> None:

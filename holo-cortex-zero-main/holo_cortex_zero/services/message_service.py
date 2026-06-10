@@ -636,6 +636,7 @@ class MessageService:
                 chat_key=chat_key,
                 message=final_message if not final_message.is_empty() else None,
                 ctx=final_ctx,
+                source_scope=source_scope,
             ),
         )
         self.running_tasks[execution_key] = task
